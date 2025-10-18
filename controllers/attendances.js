@@ -4,6 +4,16 @@ import { query, run } from '../db.js';
 
 const router = express.Router();
 
+// Block supervisors from viewing attendance data via GET
+router.use((req, res, next) => {
+  const role = req.session?.user?.role;
+  if (role === 'security_supervisor' && req.method === 'GET') {
+    return res.status(403).json({ error: 'Forbidden: supervisors cannot view attendance data' });
+  }
+  next();
+});
+
+
 /** List attendances (with employee name) */
 router.get('/', async (req, res) => {
   try {

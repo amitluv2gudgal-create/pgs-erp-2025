@@ -1,138 +1,135 @@
 // public/js/deductions.js
+// - loadDeductions(): list for table
+// - window.showDeductionForm(): render create form with Employee dropdown + clear after submit
 
-// --- helpers ---
-function $(sel, root = document) { return root.querySelector(sel); }
-function create(tag, props = {}) { const el = document.createElement(tag); Object.assign(el, props); return el; }
+import { loadEmployees } from './employees.js';
 
-// Open a lightweight modal for the Create Deduction form
-export function showDeductionForm() {
-  if ($('#deduction-modal')) return;
+export async function loadDeductions() {
+  try {
+    const res = await fetch('/api/deductions');
+    if (!res.ok) throw new Error(await res.text());
+    return await res.json();
+  } catch (err) {
+    console.error('loadDeductions error:', err);
+    return [];
+  }
+}
 
-  const overlay = create('div', { id: 'deduction-modal' });
-  overlay.style.position = 'fixed';
-  overlay.style.inset = '0';
-  overlay.style.background = 'rgba(0,0,0,.35)';
-  overlay.style.zIndex = '9999';
-  overlay.style.display = 'flex';
-  overlay.style.alignItems = 'center';
-  overlay.style.justifyContent = 'center';
+function escapeHTML(s) {
+  if (s == null) return '';
+  return String(s)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
 
-  const card = create('div');
-  card.style.background = '#fff';
-  card.style.minWidth = '320px';
-  card.style.maxWidth = '520px';
-  card.style.padding = '16px';
-  card.style.borderRadius = '12px';
-  card.style.boxShadow = '0 10px 30px rgba(0,0,0,.2)';
+async function populateEmployeeDropdown(selectId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  try {
+    const emps = (typeof loadEmployees === 'function') ? await loadEmployees() : [];
+    if (!Array.isArray(emps) || emps.length === 0) {
+      sel.innerHTML = '<option value="">No employees available</option>';
+      return;
+    }
+    sel.innerHTML = ['<option value="">Select Employee</option>']
+      .concat(emps.map(e => `<option value="${e.id}">${escapeHTML(e.name || `ID ${e.id}`)} (ID: ${e.id})</option>`))
+      .join('');
+  } catch (e) {
+    console.error('populateEmployeeDropdown error:', e);
+    sel.innerHTML = '<option value="">Failed to load employees</option>';
+  }
+}
 
-  card.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-      <h3 style="margin:0;">Create Deduction</h3>
-      <button id="deduction-close" title="Close" style="border:none;background:transparent;font-size:20px;cursor:pointer">&times;</button>
-    </div>
-    <form id="deductionForm">
-      <label>Employee ID<br><input type="number" id="employee_id" required></label><br><br>
-      <label>Month (YYYY-MM)<br><input type="text" id="month" required pattern="\\d{4}-\\d{2}" placeholder="2025-10"></label><br><br>
-      <div style="display:flex;gap:12px">
-        <label style="flex:1">Fine (₹)<br><input type="number" step="0.01" id="fine" value="0" min="0"></label>
-        <label style="flex:1">Uniform (₹)<br><input type="number" step="0.01" id="uniform" value="0" min="0"></label>
-      </div>
-      <label style="display:block;margin:10px 0;"><input type="checkbox" id="also_generate"> Also generate salary slip now</label>
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
-        <button type="button" id="deduction-cancel">Cancel</button>
-        <button type="submit">Save</button>
+window.showDeductionForm = async () => {
+  // Hide open tables/forms
+  document.querySelectorAll('[id^="table-container-"]').forEach(d => d.style.display = 'none');
+  document.querySelectorAll('[id^="form-container-"]').forEach(d => d.style.display = 'none');
+
+  // Ensure form container
+  const containerId = 'form-container-deduction';
+  let container = document.getElementById(containerId);
+  if (!container) {
+    container = document.createElement('div');
+    container.id = containerId;
+    document.getElementById('content').appendChild(container);
+  }
+  container.style.display = 'block';
+
+  container.innerHTML = `
+    <h3>Create Deduction</h3>
+    <form id="deductionForm" autocomplete="off">
+      <label>Employee (required):<br>
+        <select id="ded_employee_id" required>
+          <option value="">Loading employees...</option>
+        </select>
+      </label><br><br>
+
+      <label>Month (YYYY-MM, required):<br>
+        <input type="month" id="ded_month" required>
+      </label><br><br>
+
+      <label>Reason (required):<br>
+        <select id="ded_reason" required>
+          <option value="">Select</option>
+          <option value="Fine">Fine</option>
+          <option value="Uniform">Uniform</option>
+          <option value="Other">Other</option>
+        </select>
+      </label><br><br>
+
+      <label>Amount (₹, required):<br>
+        <input type="number" id="ded_amount" min="0" step="1" required>
+      </label><br><br>
+
+      <label>Note (optional):<br>
+        <input type="text" id="ded_note" placeholder="Optional remarks">
+      </label><br><br>
+
+      <div style="display:flex;gap:8px;">
+        <button type="submit" id="ded_submit">Save</button>
+        <button type="button" id="ded_reset">Reset</button>
       </div>
     </form>
   `;
 
-  overlay.appendChild(card);
-  document.body.appendChild(overlay);
+  await populateEmployeeDropdown('ded_employee_id');
 
-  const close = () => overlay.remove();
-  $('#deduction-close', card).onclick = close;
-  $('#deduction-cancel', card).onclick = close;
+  const form = document.getElementById('deductionForm');
+  document.getElementById('ded_reset').onclick = () => form.reset();
 
-  $('#deductionForm', card).addEventListener('submit', async (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const employee_id = parseInt($('#employee_id', card).value, 10);
-    const month = $('#month', card).value.trim();
-    const fine = parseFloat($('#fine', card).value) || 0;
-    const uniform = parseFloat($('#uniform', card).value) || 0;
-    const alsoGenerate = $('#also_generate', card).checked;
+    const submitBtn = document.getElementById('ded_submit');
+    submitBtn.disabled = true;
 
-    if (!/^\d{4}-\d{2}$/.test(month)) { alert('Month must be in YYYY-MM'); return; }
-    if (!Number.isInteger(employee_id) || employee_id <= 0) { alert('Invalid Employee ID'); return; }
-    if (fine <= 0 && uniform <= 0) { alert('At least one deduction amount must be greater than 0'); return; }
+    const employee_id = parseInt(document.getElementById('ded_employee_id').value, 10);
+    const month = document.getElementById('ded_month').value;
+    const reason = document.getElementById('ded_reason').value;
+    const amount = Number(document.getElementById('ded_amount').value || 0);
+    const note = document.getElementById('ded_note').value.trim();
+
+    if (!employee_id) { alert('Please select an employee'); submitBtn.disabled = false; return; }
+    if (!month) { alert('Please select month'); submitBtn.disabled = false; return; }
+    if (!reason) { alert('Please select reason'); submitBtn.disabled = false; return; }
+    if (!(amount > 0)) { alert('Amount must be greater than 0'); submitBtn.disabled = false; return; }
 
     try {
-      let savedCount = 0;
-
-      // Save Fine separately if >0
-      if (fine > 0) {
-        const saveFine = await fetch('/api/deductions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ employee_id, month, amount: fine, reason: 'Fine' })
-        });
-        if (!saveFine.ok) throw new Error('Failed to save Fine deduction');
-        savedCount++;
-      }
-
-      // Save Uniform separately if >0
-      if (uniform > 0) {
-        const saveUniform = await fetch('/api/deductions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ employee_id, month, amount: uniform, reason: 'Uniform' })
-        });
-        if (!saveUniform.ok) throw new Error('Failed to save Uniform deduction');
-        savedCount++;
-      }
-
-      if (savedCount === 0) throw new Error('No deductions to save');
-
-      // Optional: Generate salary slip now (pass separate fine/uniform values)
-      if (alsoGenerate) {
-        const resp = await fetch(`/api/salaries/generate/${employee_id}/${month}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fine, uniform })
-        });
-        if (!resp.ok) throw new Error('Salary slip generation failed');
-
-        const blob = await resp.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `salary_${employee_id}_${month}.pdf`;
-        a.click();
-        window.URL.revokeObjectURL(url);
-      }
-
-      // Refresh the deductions table
-      await window.showTable('deductions');
-      close();
-      alert(`${savedCount} deduction(s) saved.`);
+      const res = await fetch('/api/deductions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ employee_id, month, reason, amount, note })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      alert('Deduction saved');
+      form.reset();
     } catch (err) {
-      console.error(err);
-      alert(err.message);
+      console.error('Create deduction error:', err);
+      alert('Failed to save: ' + (err.message || 'Unknown error'));
+    } finally {
+      submitBtn.disabled = false;
     }
   });
-}
-
-// Load all deductions and return the data array (for app.js table rendering)
-export async function loadDeductions() {
-  try {
-    const res = await fetch('/api/deductions');
-    if (!res.ok) {
-      throw new Error(`HTTP error! status: ${res.status}`);
-    }
-    const data = await res.json();
-    return Array.isArray(data) ? data : []; // Ensure array, fallback to empty
-  } catch (error) {
-    console.error('Error loading deductions:', error);
-    return []; // Empty array on error to avoid app.js crash
-  }
-}
-
-window.showDeductionForm = showDeductionForm;
+};
