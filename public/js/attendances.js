@@ -1,8 +1,5 @@
 // public/js/attendances.js
-// Changes:
-// - Create Attendance form uses dropdowns for Client & Employee.
-// - Submits to /api/attendances (HR) with submitted_by handled server-side.
-// - Keeps modal UX and refreshes table after save.
+// HR: Create Attendance (with 0/1/2 dropdown) + table loader
 
 function $(sel, root = document) { return root.querySelector(sel); }
 function $all(sel, root = document) { return Array.from(root.querySelectorAll(sel)); }
@@ -23,12 +20,13 @@ async function getEmployees() {
   try { return await fetchJSON('/api/employees'); } catch { return []; }
 }
 
-// Build <option> list
+// Build <option>
 function optionHTML(value, label) {
   return `<option value="${String(value)}">${label}</option>`;
 }
 
-// Show form for creating attendance (HR flow by default)
+// ---------- HR FORM ----------
+// Shows modal with Employee, Client, Date and Attendance (0/1/2)
 export function showAttendanceForm() {
   if ($('#attendance-modal')) return;
 
@@ -56,18 +54,22 @@ export function showAttendanceForm() {
         </select>
       </label><br><br>
 
-      <label>Client (required, for billing):<br>
+      <label>Client (required):<br>
         <select id="client_id" required>
           <option value="">Loading clients...</option>
         </select>
       </label><br><br>
 
-      <label>Date (YYYY-MM-DD, required):<br>
+      <label>Date (required):<br>
         <input type="date" id="date" required>
       </label><br><br>
 
-      <label>Present:<br>
-        <input type="checkbox" id="present" checked>
+      <label>Attendance (required):<br>
+        <select id="present" required>
+          <option value="1">Present (1)</option>
+          <option value="2">Weekly Off / Holiday Duty (2)</option>
+          <option value="0">Absent (0)</option>
+        </select>
       </label><br><br>
 
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
@@ -105,6 +107,16 @@ export function showAttendanceForm() {
     } else {
       cliSel.innerHTML = '<option value="">No clients available</option>';
     }
+
+    // Auto-select client when an employee is chosen (if employee has client_id)
+    empSel.addEventListener('change', () => {
+      const eid = parseInt(empSel.value, 10);
+      const emp = Array.isArray(employees) ? employees.find(x => x.id === eid) : null;
+      if (emp && emp.client_id) {
+        const idx = Array.prototype.findIndex.call(cliSel.options, o => Number(o.value) === Number(emp.client_id));
+        if (idx >= 0) cliSel.selectedIndex = idx;
+      }
+    });
   })();
 
   // Submit
@@ -113,20 +125,22 @@ export function showAttendanceForm() {
     const employee_id = parseInt($('#employee_id', card).value, 10);
     const client_id = parseInt($('#client_id', card).value, 10);
     const date = $('#date', card).value;
-    const present = $('#present', card).checked ? 1 : 0;
+    const present = parseInt($('#present', card).value, 10); // 0/1/2
 
-    if (!Number.isInteger(employee_id) || employee_id <= 0) { alert('Please select an Employee'); return; }
-    if (!Number.isInteger(client_id) || client_id <= 0) { alert('Please select a Client'); return; }
-    if (!date) { alert('Date is required'); return; }
-
-    const formData = { employee_id, client_id, date, present };
+    if (!employee_id) return alert('Please select an Employee');
+    if (!client_id) return alert('Please select a Client');
+    if (!date) return alert('Date is required');
+    if (![0,1,2].includes(present)) return alert('Attendance must be 0, 1, or 2');
 
     try {
+      console.log('[HR FORM] payload:', { employee_id, client_id, date, present });
       const response = await fetch('/api/attendances', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
-      });
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ employee_id, client_id, date, present }),
+  credentials: 'include'
+});
+
 
       if (response.ok) {
         alert('Attendance recorded successfully!');
@@ -143,7 +157,7 @@ export function showAttendanceForm() {
   });
 }
 
-// Load all attendances with joined names for viewing
+// Load all attendances for table view
 export const loadAttendances = async () => {
   try {
     const res = await fetch('/api/attendances');
@@ -168,6 +182,4 @@ function escapeHTML(s) {
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
 }
-
-// Keep global handle like before
 window.showAttendanceForm = showAttendanceForm;

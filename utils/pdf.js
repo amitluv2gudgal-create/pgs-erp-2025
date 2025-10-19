@@ -289,15 +289,15 @@ export const generateSalaryPDF = (employee, month, attendance_days, daily_salary
   });
 };
 
-// Generate Attendance Chart
 /**
  * Generate client-wise attendance chart PDF as Buffer.
+ * Counts value 2 as TWO days in the row sum.
  * @param {Object} params
  * @param {{id:number,name:string,address?:string}} params.client
  * @param {string} params.month "YYYY-MM"
  * @param {Array<{id:number,name:string}>} params.employees sorted list for the client
  * @param {number} params.daysInMonth 28..31
- * @param {Map<number, Set<string>>} params.presentByEmp Map of employee_id -> Set of ISO date strings present
+ * @param {Map<number, Map<string, number>|Set<string>>} params.presentByEmp  // Map<empId, Map<isoDate, 0|1|2>> preferred
  * @returns {Promise<Buffer>}
  */
 export async function generateAttendanceChartPDF({ client, month, employees, daysInMonth, presentByEmp }) {
@@ -308,109 +308,87 @@ export async function generateAttendanceChartPDF({ client, month, employees, day
     doc.on('error', reject);
     doc.on('end', () => resolve(Buffer.concat(chunks)));
 
-    // Page geometry
     const pageW = doc.page.width;
     const pageH = doc.page.height;
-    const left = 24, right = pageW - 24, top = 24, bottom = pageH - 24;
+    const left = 24, right = pageW - 24, bottom = pageH - 24;
 
     // Header
-    const title = `Attendance Chart — ${client?.name || 'Client'} — ${month}`;
-    doc.fontSize(16).text(title, { align: 'center' });
-    doc.moveDown(0.5);
-    if (client?.address) doc.fontSize(10).text(`Address: ${client.address}`, { align: 'center' });
-    doc.moveDown(0.5);
-    doc.fontSize(9).text('1 = Present, 0 = Absent. Only verified attendance is shown.', { align: 'center' });
-    doc.moveDown(0.5);
+    const mainTitle = `Attendance Chart — ${client?.name || 'Client'} — ${month}`;
+    function header(title = mainTitle) {
+      doc.fontSize(16).text(title, { align: 'center' });
+      doc.moveDown(0.5);
+      if (client?.address) doc.fontSize(10).text(`Address: ${client.address}`, { align: 'center' });
+      doc.moveDown(0.5);
+      doc.fontSize(9).text('Values: 0 = Absent, 1 = Present, 2 = Weekly Off/Holiday Duty (counts as 2). Only verified attendance is shown.', { align: 'center' });
+      doc.moveDown(0.5);
+    }
 
-    // Table layout
-    const startY0 = doc.y + 8;
-    const rowH = 18;                 // row height
-    const headerH = 22;              // header row height
-    const sNoW = 36;                 // S.No width
-    const nameW = 180;               // Name column width
-    const sumW = 60;                 // Sum/Total width
-    const daysW = (right - left) - sNoW - nameW - sumW - 2; // total width for day columns
-    const dayColW = Math.max(14, Math.floor(daysW / daysInMonth)); // minimal readable width
+    // Table metrics
+    const rowH = 18;
+    const headerH = 22;
+    const sNoW = 36;
+    const nameW = 180;
+    const sumW = 60;
+    const daysW = (right - left) - sNoW - nameW - sumW - 2;
+    const dayColW = Math.max(14, Math.floor(daysW / daysInMonth));
 
-    // Draw table header
-    function drawHeader() {
+    function drawHeaderRow() {
       doc.fontSize(10).font('Helvetica-Bold');
-      let x = left, y = doc.y;
-      // Header background
+      const y = doc.y;
       doc.rect(left, y, (right - left), headerH).fill('#eeeeee').fillColor('black');
+      doc.lineWidth(0.5).strokeColor('#000000').rect(left, y, (right - left), headerH).stroke();
 
-      // Borders
-      doc.lineWidth(0.5).strokeColor('#000000');
-      doc.rect(left, y, (right - left), headerH).stroke();
-
-      // Text
+      let x = left;
       doc.text('S.No.', x + 4, y + 5, { width: sNoW - 8, align: 'left' }); x += sNoW;
       doc.text('Name of the Employee', x + 4, y + 5, { width: nameW - 8, align: 'left' }); x += nameW;
-
       for (let d = 1; d <= daysInMonth; d++) {
         doc.text(String(d).padStart(2, '0'), x, y + 5, { width: dayColW, align: 'center' });
         x += dayColW;
       }
       doc.text('Sum', x, y + 5, { width: sumW, align: 'center' });
-
-      // Move cursor to start of body
       doc.y = y + headerH;
     }
 
-    // Draw a single row
-    function drawRow(idx, emp) {
+    function row(empIndex, emp) {
       const y = doc.y;
-      const presentDates = presentByEmp.get(emp.id) || new Set();
+      doc.lineWidth(0.2).strokeColor('#000000').rect(left, y, (right - left), rowH).stroke();
+
       let x = left;
-
-      // Row border
-      doc.lineWidth(0.2).strokeColor('#000000');
-      doc.rect(left, y, (right - left), rowH).stroke();
-
-      // Serial
       doc.font('Helvetica').fontSize(9);
-      doc.text(String(idx), x + 4, y + 4, { width: sNoW - 8, align: 'left' }); x += sNoW;
-
-      // Name
+      doc.text(String(empIndex), x + 4, y + 4, { width: sNoW - 8, align: 'left' }); x += sNoW;
       doc.text(emp.name || `ID ${emp.id}`, x + 4, y + 4, { width: nameW - 8, align: 'left' }); x += nameW;
 
-      // Days 1..N
+      const perEmp = presentByEmp.get(emp.id);
       let sum = 0;
       for (let d = 1; d <= daysInMonth; d++) {
-        const dayStr = String(d).padStart(2, '0');
-        const iso = `${month}-${dayStr}`;        // e.g., 2025-10-05
-        const val = presentDates.has(iso) ? 1 : 0;
-        if (val === 1) sum += 1;
+        const iso = `${month}-${String(d).padStart(2, '0')}`;
+        let val = 0;
+        if (perEmp instanceof Set) {
+          val = perEmp.has(iso) ? 1 : 0;            // legacy set
+        } else if (perEmp && typeof perEmp.get === 'function') {
+          val = Number(perEmp.get(iso) ?? 0);       // 0|1|2
+        }
+        sum += (val === 2 ? 2 : val === 1 ? 1 : 0);
         doc.text(String(val), x, y + 4, { width: dayColW, align: 'center' });
         x += dayColW;
       }
-
-      // Sum
       doc.text(String(sum), x, y + 4, { width: sumW, align: 'center' });
-
-      // advance
       doc.y = y + rowH;
     }
 
-    // Pagination logic
-    let startY = startY0;
-    let idx = 1;
-    for (let i = 0; i < employees.length; i++) {
-      // If not enough room for header+one row, add page
-      if ((doc.y === startY0 ? startY0 : doc.y) + rowH + 10 > bottom) {
-        doc.addPage({ size: 'A4', layout: 'landscape', margin: 24 });
-        // header again on new page
-        const title2 = `Attendance Chart — ${client?.name || 'Client'} — ${month} (contd.)`;
-        doc.fontSize(16).text(title2, { align: 'center' });
-        doc.moveDown(0.5);
-        doc.fontSize(9).text('1 = Present, 0 = Absent. Only verified attendance is shown.', { align: 'center' });
-        doc.moveDown(0.5);
-        drawHeader();
-      }
+    // Start first page
+    header();
+    drawHeaderRow();
 
-      // If we are at a fresh page or first table body row, draw header
-      if (doc.y <= startY0) drawHeader();
-      drawRow(idx++, employees[i]);
+    let serial = 1;
+    for (const emp of employees) {
+      // new page if needed
+      if (doc.y + rowH + 10 > bottom) {
+        doc.addPage({ size: 'A4', layout: 'landscape', margin: 24 });
+        header(`${mainTitle} (contd.)`);
+        drawHeaderRow();
+      }
+      row(serial++, emp);
     }
 
     doc.end();

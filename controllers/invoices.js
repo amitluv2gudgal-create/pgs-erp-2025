@@ -44,7 +44,7 @@ router.post('/', async (req, res) => {
     const ym = parseMonth(month);
     if (!ym) return res.status(400).json({ error: 'Invalid month. Use "YYYY-MM".' });
 
-    // Fetch client
+    // Client
     const clients = await query('SELECT * FROM clients WHERE id = ?', [client_id]);
     const client = clients[0];
     if (!client) return res.status(404).json({ error: `Client not found: ${client_id}` });
@@ -75,14 +75,15 @@ router.post('/', async (req, res) => {
     const end   = `${ym.y}-${String(ym.m).padStart(2, '0')}-${String(dim).padStart(2, '0')}`;
 
     // Attendance roll-up per category (ONLY verified)
+    // NOTE: present=2 counts as TWO days; present=1 counts as ONE day.
     const attRows = await query(`
       WITH base AS (
         SELECT 
           COALESCE(e.category, '') AS emp_category,
           CASE 
+            WHEN a.present IN (2, '2') THEN 2
             WHEN a.present IN (1, '1', 'true', 'TRUE') THEN 1
-            WHEN a.present IS NULL THEN 0
-            ELSE CAST(a.present AS REAL)
+            ELSE 0
           END AS present_val
         FROM attendances a 
         JOIN employees e ON e.id = a.employee_id
@@ -152,20 +153,18 @@ router.post('/', async (req, res) => {
     const finalInvoiceNo = providedInvoiceNo || insertId.toString();
     await run('UPDATE invoices SET invoice_no = ? WHERE id = ?', [finalInvoiceNo, insertId]);
 
-    // 1) Generate the standard invoice PDF
+    // 1) Standard invoice PDF
     const invoicePDF = await generateInvoicePDF(
       client, month, categoryData, subtotal, service_charges, total, cgst_amount, sgst_amount, grand_total,
       finalInvoiceNo, invoiceDate, invoiceMonth
     );
 
-    // 2) Build attendance chart data
-    //    - employees of this client
+    // 2) Attendance chart data
     const employees = await query(
       'SELECT id, name FROM employees WHERE client_id = ? ORDER BY name ASC',
       [client_id]
     );
 
-    //    - verified attendance rows for the month
     const aRows = await query(
       `SELECT employee_id, date, present 
        FROM attendances 
@@ -173,23 +172,22 @@ router.post('/', async (req, res) => {
       [client_id, start, end]
     );
 
-    //    - Map: emp_id -> Set of ISO dates present
+    // Map<empId, Map<isoDate, 0|1|2>>
     const presentByEmp = new Map();
-    for (const e of employees) presentByEmp.set(e.id, new Set());
+    for (const e of employees) presentByEmp.set(e.id, new Map());
     for (const r of aRows) {
-      if (String(r.present) === '1' || String(r.present).toLowerCase() === 'true') {
-        const iso = String(r.date).slice(0, 10); // YYYY-MM-DD
-        if (!presentByEmp.has(r.employee_id)) presentByEmp.set(r.employee_id, new Set());
-        presentByEmp.get(r.employee_id).add(iso);
-      }
+      const iso = String(r.date).slice(0, 10);
+      const val = Number(r.present) || 0;     // 0|1|2
+      if (!presentByEmp.has(r.employee_id)) presentByEmp.set(r.employee_id, new Map());
+      presentByEmp.get(r.employee_id).set(iso, val);
     }
 
-    // 3) Generate the attendance chart PDF (landscape, multi-page as needed)
+    // 3) Attendance chart PDF (landscape)
     const chartPDF = await generateAttendanceChartPDF({
       client, month, employees, daysInMonth: dim, presentByEmp
     });
 
-    // 4) Append chart pages to invoice using pdf-lib
+    // 4) Append chart pages to invoice
     const mainDoc = await PDFDocument.load(invoicePDF);
     const chartDoc = await PDFDocument.load(chartPDF);
     const chartPages = await mainDoc.copyPages(chartDoc, chartDoc.getPageIndices());

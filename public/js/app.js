@@ -191,7 +191,7 @@ window.showSupervisorForm = async () => {
 window.showAttendanceFormForSupervisor = async () => {
   if (document.getElementById('attendance-modal')) return;
 
-  // Fetch lists (reuse shared loaders)
+  // Fetch lists (reuse shared loaders if available)
   const [employees, clients] = await Promise.all([
     (typeof loadEmployees === 'function' ? loadEmployees() : fetch('/api/employees').then(r => r.json()).catch(() => [])),
     (typeof loadClients === 'function' ? loadClients() : fetch('/api/clients').then(r => r.json()).catch(() => [])),
@@ -208,7 +208,6 @@ window.showAttendanceFormForSupervisor = async () => {
   const card = document.createElement('div');
   card.style.cssText = 'background:#fff;min-width:320px;max-width:560px;padding:16px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2)';
 
-  // Build options helpers
   const empOptions = Array.isArray(employees) && employees.length
     ? ['<option value="">Select Employee</option>'].concat(
         employees.map(e => `<option value="${e.id}">${escapeHtml(e.name || ('Employee ' + e.id))} (ID: ${e.id})</option>`)
@@ -239,8 +238,12 @@ window.showAttendanceFormForSupervisor = async () => {
         <input type="date" id="sup_date" required>
       </label><br><br>
 
-      <label>Present:<br>
-        <input type="checkbox" id="sup_present" checked>
+      <label>Attendance (required):<br>
+        <select id="sup_present" required>
+          <option value="1">Present (1)</option>
+          <option value="2">Weekly Off / Holiday Duty (2)</option>
+          <option value="0">Absent (0)</option>
+        </select>
       </label><br><br>
 
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
@@ -252,7 +255,6 @@ window.showAttendanceFormForSupervisor = async () => {
   overlay.appendChild(card);
   document.body.appendChild(overlay);
 
-  // helpers
   function escapeHtml(s) {
     if (s == null) return '';
     return String(s)
@@ -267,14 +269,13 @@ window.showAttendanceFormForSupervisor = async () => {
   document.getElementById('attendance-close').onclick = close;
   document.getElementById('attendance-cancel').onclick = close;
 
-  // Auto-select Client when Employee changes (if that employee has client_id)
+  // Auto-select client when employee changes (if employee has client_id)
   const empSel = document.getElementById('sup_employee_id');
   const cliSel = document.getElementById('sup_client_id');
   empSel.addEventListener('change', () => {
     const eid = parseInt(empSel.value, 10);
     const emp = employeesById[eid];
     if (emp && emp.client_id && Array.isArray(clients)) {
-      // find matching option
       const idx = Array.prototype.findIndex.call(cliSel.options, o => Number(o.value) === Number(emp.client_id));
       if (idx >= 0) cliSel.selectedIndex = idx;
     }
@@ -286,13 +287,15 @@ window.showAttendanceFormForSupervisor = async () => {
     const employee_id = parseInt(empSel.value, 10);
     const client_id = parseInt(cliSel.value, 10);
     const date = document.getElementById('sup_date').value;
-    const present = document.getElementById('sup_present').checked ? 1 : 0;
+    const present = parseInt(document.getElementById('sup_present').value, 10); // 0/1/2
 
     if (!Number.isInteger(employee_id) || employee_id <= 0) return alert('Please select an Employee');
     if (!Number.isInteger(client_id) || client_id <= 0) return alert('Please select a Client');
     if (!date) return alert('Date is required');
+    if (![0,1,2].includes(present)) return alert('Attendance must be 0, 1, or 2');
 
     try {
+      console.log('[SUP FORM] payload:', { employee_id, client_id, date, present });
       const response = await fetch('/api/attendances/supervisor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -305,7 +308,8 @@ window.showAttendanceFormForSupervisor = async () => {
       }
       alert('Attendance submitted for HR verification');
       close();
-      if (window.showTable) window.showTable('attendances'); // will be blocked for supervisors, harmless
+      // IMPORTANT: do NOT open attendance table for supervisors
+      return;
     } catch (err) {
       console.error('Supervisor attendance submit error:', err);
       alert('Error: ' + (err.message || 'Unknown error'));

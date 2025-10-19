@@ -1,4 +1,4 @@
-// controllers/salaries.js
+// PGS-ERP/controllers/salaries.js
 import express from 'express';
 import { query, run } from '../db.js';
 import { generateSalaryPDF } from '../utils/pdf.js';
@@ -24,8 +24,7 @@ router.get('/', async (req, res) => {
 // POST /generate/:employee_id/:month - Generate salary slip
 router.post('/generate/:employee_id/:month', async (req, res) => {
   const { employee_id, month } = req.params;
-  // Optional extra deduction buckets the form may pass (not mandatory)
-  const { fine = 0, uniform = 0 } = req.body;
+  const { fine = 0, uniform = 0 } = req.body;  // optional extras
 
   try {
     const eid = Number.parseInt(employee_id, 10);
@@ -33,32 +32,33 @@ router.post('/generate/:employee_id/:month', async (req, res) => {
       throw new Error('Invalid employee_id');
     }
 
-    // Fetch employee
+    // Employee
     const employees = await query('SELECT * FROM employees WHERE id = ?', [eid]);
     const employee = employees[0];
-    if (!employee) {
-      throw new Error(`Employee ID ${eid} not found`);
-    }
+    if (!employee) throw new Error(`Employee ID ${eid} not found`);
 
-    // Parse month and compute boundaries
-    const ym = parseMonth(month); // { y, m } where m is 1..12
+    // Month boundaries
+    const ym = parseMonth(month);
     if (!ym) throw new Error('Invalid month format: use YYYY-MM');
-
-    // Days in the month: Date(year, monthIndex+1, 0) -> last day of current month
     const daysInMonth = new Date(ym.y, ym.m, 0).getDate();
     const mm = String(ym.m).padStart(2, '0');
     const startDate = `${ym.y}-${mm}-01`;
     const endDate = `${ym.y}-${mm}-${String(daysInMonth).padStart(2, '0')}`;
 
-    // Attendance (ONLY verified)
+    // Attendance (ONLY verified) — present=2 counts as TWO days
     const atts = await query(`
-      SELECT SUM(CASE WHEN present = 1 THEN 1 ELSE 0 END) AS attendance_days
+      SELECT SUM(
+        CASE 
+          WHEN present = 2 THEN 2
+          WHEN present = 1 THEN 1
+          ELSE 0
+        END
+      ) AS attendance_days
       FROM attendances a
       WHERE a.employee_id = ? 
         AND date(a.date) BETWEEN date(?) AND date(?)
         AND a.status = 'verified'
     `, [eid, startDate, endDate]);
-
     const attendance_days = Number(atts[0]?.attendance_days || 0);
 
     // Deductions for the month
@@ -70,7 +70,6 @@ router.post('/generate/:employee_id/:month', async (req, res) => {
       FROM deductions
       WHERE employee_id = ? AND month = ?
     `, [eid, month]);
-
     const total_fine = Number(deductions[0]?.total_fine || 0);
     const total_uniform = Number(deductions[0]?.total_uniform || 0);
     const total_deductions = Number(deductions[0]?.total_deductions || 0);
@@ -80,10 +79,10 @@ router.post('/generate/:employee_id/:month', async (req, res) => {
     const daily_salary = daysInMonth ? (monthly_salary / daysInMonth) : 0;
     const gross = daily_salary * attendance_days;
 
-    // statutory examples (adjust as per your policy)
-    const pf = gross * 0.12;      // 12% PF
-    const esic = gross * 0.0083;  // 0.83% ESIC
-    const pt = 200;               // Flat PT example
+    // statutory examples (adjust as needed)
+    const pf = gross * 0.12;      // PF 12%
+    const esic = gross * 0.0083;  // ESIC 0.83%
+    const pt = 200;               // PT flat example
 
     const extraFine = Number(fine || 0);
     const extraUniform = Number(uniform || 0);
@@ -91,7 +90,7 @@ router.post('/generate/:employee_id/:month', async (req, res) => {
     const combinedDeductions = pf + esic + pt + total_deductions + extraFine + extraUniform;
     const net = gross - combinedDeductions;
 
-    // Client name (site) if needed in PDF
+    // Client name for PDF (site)
     const client = await query('SELECT name FROM clients WHERE id = (SELECT client_id FROM employees WHERE id = ?)', [eid]);
     const clientName = client[0]?.name || 'N/A';
 
