@@ -317,7 +317,7 @@ window.showAttendanceFormForSupervisor = async () => {
   });
 };
 
-
+// Renders tables with role-based actions
 window.renderTable = (containerId, table, data, searchTerm) => {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -326,10 +326,11 @@ window.renderTable = (containerId, table, data, searchTerm) => {
   if (!tableDiv) return;
 
   let html = '<table border="1"><tr>';
+
   if (data.length > 0) {
     Object.keys(data[0]).forEach(key => html += `<th>${key}</th>`);
 
-    // Add Actions column logic:
+    // Add Actions column:
     if (table === 'attendances' && user?.role === 'hr') {
       html += '<th>Actions</th>';
     } else if (table === 'security_supervisors' && user?.role === 'admin') {
@@ -372,15 +373,15 @@ window.renderTable = (containerId, table, data, searchTerm) => {
 
       // Actions cell
       if (table === 'attendances' && user?.role === 'hr') {
-        // Only show buttons if pending
-        if (row.status === 'pending') {
-          html += `<td>
-            <button onclick="approveAttendance(${row.id})">Approve</button>
-            <button onclick="rejectAttendance(${row.id})">Reject</button>
-          </td>`;
-        } else {
-          html += `<td>-</td>`;
-        }
+        // Approve/Reject for pending + Edit/Delete always
+        const approveReject = (row.status === 'pending')
+          ? `<button onclick="approveAttendance(${row.id})">Approve</button>
+             <button onclick="rejectAttendance(${row.id})">Reject</button>`
+          : '';
+        const editDelete = `
+          <button onclick="editAttendance(${row.id})">Edit</button>
+          <button onclick="deleteAttendance(${row.id})">Delete</button>`;
+        html += `<td style="white-space:nowrap;">${approveReject} ${editDelete}</td>`;
       } else if (table === 'security_supervisors' && user?.role === 'admin') {
         html += `<td><button onclick="editSupervisor(${row.id}, '${row.name}', '${row.username}', ${row.client_id}, '${row.site_name}')">Edit</button> <button onclick="deleteSupervisor(${row.id})">Delete</button></td>`;
       } else if (['accountant', 'hr'].includes(user?.role) && table !== 'attendances') {
@@ -407,6 +408,7 @@ window.renderTable = (containerId, table, data, searchTerm) => {
   tableDiv.innerHTML = html;
 };
 
+
 // === Add these helpers anywhere after renderTable ===
 window.approveAttendance = async (id) => {
   try {
@@ -423,6 +425,145 @@ window.approveAttendance = async (id) => {
 window.rejectAttendance = async (id) => {
   try {
     const r = await fetch(`/api/attendances/${id}/reject`, { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    alert('Attendance rejected');
+    if (window.showTable) window.showTable('attendances');
+  } catch (e) {
+    console.error('rejectAttendance error:', e);
+    alert('Failed to reject: ' + (e.message || 'Unknown'));
+  }
+};
+
+// Open an edit modal for an attendance (HR only)
+window.editAttendance = async (id) => {
+  try {
+    // Fetch the row (server-side truth)
+    const r = await fetch(`/api/attendances/${id}`, { credentials: 'include' });
+    if (!r.ok) throw new Error(await r.text());
+    const row = await r.json();
+
+    // Fetch employees & clients for dropdowns
+    const [employees, clients] = await Promise.all([
+      (typeof loadEmployees === 'function' ? loadEmployees() : fetch('/api/employees').then(x=>x.json())),
+      (typeof loadClients === 'function' ? loadClients() : fetch('/api/clients').then(x=>x.json())),
+    ]);
+
+    // Build modal
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:9999;display:flex;align-items:center;justify-content:center';
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#fff;min-width:340px;max-width:600px;padding:16px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2)';
+
+    const empOptions = Array.isArray(employees) ? employees.map(e =>
+      `<option value="${e.id}" ${e.id===row.employee_id?'selected':''}>${(e.name||`ID ${e.id}`)} (ID: ${e.id})</option>`
+    ).join('') : '';
+
+    const cliOptions = Array.isArray(clients) ? clients.map(c =>
+      `<option value="${c.id}" ${c.id===row.client_id?'selected':''}>${(c.name||`Client ${c.id}`)} (ID: ${c.id})</option>`
+    ).join('') : '';
+
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <h3 style="margin:0;">Edit Attendance #${id}</h3>
+        <button id="att-edit-close" style="border:none;background:transparent;font-size:20px;cursor:pointer">&times;</button>
+      </div>
+      <form id="attEditForm">
+        <label>Employee:<br>
+          <select id="att_employee_id" required>${empOptions}</select>
+        </label><br><br>
+        <label>Client:<br>
+          <select id="att_client_id" required>${cliOptions}</select>
+        </label><br><br>
+        <label>Date:<br>
+          <input type="date" id="att_date" value="${String(row.date).slice(0,10)}" required>
+        </label><br><br>
+        <label>Attendance:<br>
+          <select id="att_present" required>
+            <option value="1" ${Number(row.present)===1?'selected':''}>Present (1)</option>
+            <option value="2" ${Number(row.present)===2?'selected':''}>Weekly Off / Holiday Duty (2)</option>
+            <option value="0" ${Number(row.present)===0?'selected':''}>Absent (0)</option>
+          </select>
+        </label><br><br>
+        <label>Status (read-only):<br>
+          <input type="text" id="att_status" value="${row.status || ''}" readonly>
+        </label><br><br>
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+          <button type="button" id="att-edit-cancel">Cancel</button>
+          <button type="submit">Save</button>
+        </div>
+      </form>
+    `;
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    document.getElementById('att-edit-close').onclick = close;
+    document.getElementById('att-edit-cancel').onclick = close;
+
+    document.getElementById('attEditForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const payload = {
+        employee_id: parseInt(document.getElementById('att_employee_id').value, 10),
+        client_id: parseInt(document.getElementById('att_client_id').value, 10),
+        date: document.getElementById('att_date').value,
+        present: parseInt(document.getElementById('att_present').value, 10)
+        // status left unchanged here; use Approve/Reject buttons for that flow
+      };
+      try {
+        const u = await fetch(`/api/attendances/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(payload)
+        });
+        if (!u.ok) throw new Error(await u.text());
+        close();
+        alert('Attendance updated');
+        if (window.showTable) window.showTable('attendances');
+      } catch (err) {
+        console.error('editAttendance error:', err);
+        alert('Update failed: ' + (err.message || 'Unknown error'));
+      }
+    });
+  } catch (e) {
+    console.error('editAttendance init error:', e);
+    alert('Failed to open editor');
+  }
+};
+
+// Delete an attendance (HR only)
+window.deleteAttendance = async (id) => {
+  if (!confirm(`Delete attendance #${id}? This cannot be undone.`)) return;
+  try {
+    const r = await fetch(`/api/attendances/${id}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+    if (!r.ok) throw new Error(await r.text());
+    alert('Deleted');
+    if (window.showTable) window.showTable('attendances');
+  } catch (e) {
+    console.error('deleteAttendance error:', e);
+    alert('Delete failed: ' + (e.message || 'Unknown error'));
+  }
+};
+
+// Keep existing approve/reject helpers (ensure credentials included)
+window.approveAttendance = async (id) => {
+  try {
+    const r = await fetch(`/api/attendances/${id}/approve`, { method: 'POST', credentials: 'include' });
+    if (!r.ok) throw new Error(await r.text());
+    alert('Attendance verified');
+    if (window.showTable) window.showTable('attendances');
+  } catch (e) {
+    console.error('approveAttendance error:', e);
+    alert('Failed to approve: ' + (e.message || 'Unknown'));
+  }
+};
+
+window.rejectAttendance = async (id) => {
+  try {
+    const r = await fetch(`/api/attendances/${id}/reject`, { method: 'POST', credentials: 'include' });
     if (!r.ok) throw new Error(await r.text());
     alert('Attendance rejected');
     if (window.showTable) window.showTable('attendances');

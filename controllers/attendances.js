@@ -29,6 +29,24 @@ router.get('/', async (req, res) => {
   }
 });
 
+/** Get a single attendance by id (HR/Admin/Accountant can use) */
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const rows = await query(`
+      SELECT a.*, e.name AS employee_name
+      FROM attendances a
+      LEFT JOIN employees e ON e.id = a.employee_id
+      WHERE a.id = ?
+    `, [id]);
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('GET /attendances/:id error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /** HR creates attendance -> auto-verified (not pending) */
 router.post('/', async (req, res) => {
   try {
@@ -37,21 +55,16 @@ router.post('/', async (req, res) => {
     }
 
     const { employee_id, date, present, client_id } = req.body;
-    console.log('[HR ATTENDANCE] req.body:', req.body); // <-- what frontend sent
-
     if (!employee_id || !date || present === undefined) {
       return res.status(400).json({ error: 'Missing required: employee_id, date, present' });
     }
-
     const p = Number(present);
-    if (![0, 1, 2].includes(p)) {
+    if (![0,1,2].includes(p)) {
       return res.status(400).json({ error: 'present must be 0, 1, or 2' });
     }
 
     const submitted_by = 'hr';
-    const status = 'verified';
-
-    console.log('[HR ATTENDANCE] inserting:', { employee_id, date, p, client_id: client_id ?? null, submitted_by, status });
+    const status = 'verified'; // HR submissions are verified immediately
 
     const result = await run(
       `INSERT INTO attendances (employee_id, date, present, client_id, submitted_by, status)
@@ -59,11 +72,7 @@ router.post('/', async (req, res) => {
       [employee_id, date, p, client_id || null, submitted_by, status]
     );
 
-    const insertedId = result?.lastID ?? result?.insertId;
-    const row = await query(`SELECT id, employee_id, date, present, submitted_by, status, client_id FROM attendances WHERE id = ?`, [insertedId]);
-    console.log('[HR ATTENDANCE] stored row:', row[0]);
-
-    res.json({ message: 'Attendance created (verified)', saved: row[0] });
+    res.json({ message: 'Attendance created (verified)', id: result?.lastID ?? result?.insertId });
   } catch (err) {
     console.error('POST /attendances error:', err);
     res.status(500).json({ error: err.message });
@@ -76,23 +85,17 @@ router.post('/supervisor', async (req, res) => {
     if (!req.session?.user || req.session.user.role !== 'security_supervisor') {
       return res.status(403).json({ error: 'Forbidden' });
     }
-
     let { employee_id, date, present, client_id } = req.body;
-    console.log('[SUP ATTENDANCE] req.body:', req.body); // <-- what frontend sent
-
     if (!employee_id || !date || present === undefined) {
       return res.status(400).json({ error: 'Missing required: employee_id, date, present' });
     }
-
     const p = Number(present);
-    if (![0, 1, 2].includes(p)) {
+    if (![0,1,2].includes(p)) {
       return res.status(400).json({ error: 'present must be 0, 1, or 2' });
     }
 
     const submitted_by = 'supervisor';
-    const status = 'pending';
-
-    console.log('[SUP ATTENDANCE] inserting:', { employee_id, date, p, client_id: client_id ?? null, submitted_by, status });
+    const status = 'pending'; // supervisors default to pending
 
     const result = await run(
       `INSERT INTO attendances (employee_id, date, present, client_id, submitted_by, status)
@@ -100,13 +103,63 @@ router.post('/supervisor', async (req, res) => {
       [employee_id, date, p, client_id || null, submitted_by, status]
     );
 
-    const insertedId = result?.lastID ?? result?.insertId;
-    const row = await query(`SELECT id, employee_id, date, present, submitted_by, status, client_id FROM attendances WHERE id = ?`, [insertedId]);
-    console.log('[SUP ATTENDANCE] stored row:', row[0]);
-
-    res.json({ id: insertedId, message: 'Attendance submitted for HR verification', saved: row[0] });
+    res.json({ id: result?.lastID ?? result?.insertId, message: 'Attendance submitted for HR verification' });
   } catch (err) {
     console.error('POST /attendances/supervisor error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** HR: update (edit) an attendance */
+router.put('/:id', async (req, res) => {
+  try {
+    if (!req.session?.user || req.session.user.role !== 'hr') {
+      return res.status(403).json({ error: 'Forbidden: HR only' });
+    }
+    const { id } = req.params;
+    const { employee_id, date, present, client_id, status } = req.body;
+
+    // Basic validation: allow updating these fields; present must be 0/1/2 if provided
+    if (present !== undefined) {
+      const p = Number(present);
+      if (![0,1,2].includes(p)) {
+        return res.status(400).json({ error: 'present must be 0, 1, or 2' });
+      }
+    }
+
+    // Build dynamic update
+    const fields = [];
+    const values = [];
+    if (employee_id !== undefined) { fields.push('employee_id = ?'); values.push(employee_id); }
+    if (date !== undefined)        { fields.push('date = ?');        values.push(date); }
+    if (present !== undefined)     { fields.push('present = ?');     values.push(Number(present)); }
+    if (client_id !== undefined)   { fields.push('client_id = ?');   values.push(client_id || null); }
+    if (status !== undefined)      { fields.push('status = ?');      values.push(status); }
+
+    if (!fields.length) return res.status(400).json({ error: 'No fields to update' });
+
+    values.push(id);
+    await run(`UPDATE attendances SET ${fields.join(', ')} WHERE id = ?`, values);
+
+    const rows = await query('SELECT * FROM attendances WHERE id = ?', [id]);
+    res.json({ message: 'Updated', attendance: rows[0] });
+  } catch (err) {
+    console.error('PUT /attendances/:id error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** HR: delete an attendance */
+router.delete('/:id', async (req, res) => {
+  try {
+    if (!req.session?.user || req.session.user.role !== 'hr') {
+      return res.status(403).json({ error: 'Forbidden: HR only' });
+    }
+    const { id } = req.params;
+    await run('DELETE FROM attendances WHERE id = ?', [id]);
+    res.json({ message: 'Deleted' });
+  } catch (err) {
+    console.error('DELETE /attendances/:id error:', err);
     res.status(500).json({ error: err.message });
   }
 });
