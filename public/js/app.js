@@ -317,7 +317,7 @@ window.showAttendanceFormForSupervisor = async () => {
   });
 };
 
-// Renders tables with role-based actions
+// window.renderTable
 window.renderTable = (containerId, table, data, searchTerm) => {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -325,19 +325,25 @@ window.renderTable = (containerId, table, data, searchTerm) => {
   const tableDiv = document.getElementById(`table-${table}`);
   if (!tableDiv) return;
 
+  // Helper: should we show an Actions column for this table & role?
+  const showActionsForHR =
+    (user?.role === 'hr') &&
+    (table === 'attendances' || table === 'employees'); // ✅ HR: only Attendances + Employees
+
+  const showActionsForAdmin =
+    (user?.role === 'admin') && (table === 'security_supervisors'); // Admin keeps SS actions
+
+  const showActionsForAccountant =
+    (user?.role === 'accountant') &&
+    (table === 'clients' || table === 'deductions' || table === 'invoices' || table === 'salaries'); // Accountant unchanged
+
+  const shouldShowActions = showActionsForHR || showActionsForAdmin || showActionsForAccountant;
+
   let html = '<table border="1"><tr>';
 
   if (data.length > 0) {
     Object.keys(data[0]).forEach(key => html += `<th>${key}</th>`);
-
-    // Add Actions column:
-    if (table === 'attendances' && user?.role === 'hr') {
-      html += '<th>Actions</th>';
-    } else if (table === 'security_supervisors' && user?.role === 'admin') {
-      html += '<th>Actions</th>';
-    } else if (['accountant', 'hr'].includes(user?.role) && table !== 'attendances') {
-      html += '<th>Actions</th>';
-    }
+    if (shouldShowActions) html += '<th>Actions</th>';
   }
   html += '</tr>';
 
@@ -348,9 +354,9 @@ window.renderTable = (containerId, table, data, searchTerm) => {
       if (searchTerm) {
         const exactMode = window[`exact_${table}`] || false;
         for (let key in row) {
-          let val = row[key];
+          const val = row[key];
           if (val !== null && val !== undefined) {
-            let valStr = typeof val === 'object' ? JSON.stringify(val).toLowerCase() : val.toString().toLowerCase();
+            const valStr = (typeof val === 'object' ? JSON.stringify(val) : String(val)).toLowerCase();
             rowMatches = exactMode ? (valStr === searchTerm) : valStr.includes(searchTerm);
             if (rowMatches) break;
           }
@@ -364,7 +370,7 @@ window.renderTable = (containerId, table, data, searchTerm) => {
         let cellStyle = '';
         if (searchTerm) {
           const exactMode = window[`exact_${table}`] || false;
-          const valStr = displayVal.toString().toLowerCase();
+          const valStr = String(displayVal).toLowerCase();
           const cellMatches = exactMode ? (valStr === searchTerm) : valStr.includes(searchTerm);
           if (cellMatches) cellStyle = ' style="background-color: lightyellow; font-weight: bold;"';
         }
@@ -372,42 +378,51 @@ window.renderTable = (containerId, table, data, searchTerm) => {
       });
 
       // Actions cell
-      if (table === 'attendances' && user?.role === 'hr') {
-        // Approve/Reject for pending + Edit/Delete always
-        const approveReject = (row.status === 'pending')
-          ? `<button onclick="approveAttendance(${row.id})">Approve</button>
-             <button onclick="rejectAttendance(${row.id})">Reject</button>`
-          : '';
-        const editDelete = `
-          <button onclick="editAttendance(${row.id})">Edit</button>
-          <button onclick="deleteAttendance(${row.id})">Delete</button>`;
-        html += `<td style="white-space:nowrap;">${approveReject} ${editDelete}</td>`;
-      } else if (table === 'security_supervisors' && user?.role === 'admin') {
-        html += `<td><button onclick="editSupervisor(${row.id}, '${row.name}', '${row.username}', ${row.client_id}, '${row.site_name}')">Edit</button> <button onclick="deleteSupervisor(${row.id})">Delete</button></td>`;
-      } else if (['accountant', 'hr'].includes(user?.role) && table !== 'attendances') {
-        let actions = `<button onclick="requestEdit('${table}', ${row.id})">Edit</button> <button onclick="requestDelete('${table}', ${row.id})">Delete</button>`;
-        if (table === 'clients' && user.role === 'accountant') {
-          actions += ` <button onclick="showCategoryForm(${row.id})">Add Category</button>`;
+      if (shouldShowActions) {
+        if (table === 'attendances' && user?.role === 'hr') {
+          // HR: Approve/Reject (if pending) + Edit/Delete
+          const approveReject = (row.status === 'pending')
+            ? `<button onclick="approveAttendance(${row.id})">Approve</button>
+               <button onclick="rejectAttendance(${row.id})">Reject</button>`
+            : '';
+          const editDelete = `
+            <button onclick="editAttendance(${row.id})">Edit</button>
+            <button onclick="deleteAttendance(${row.id})">Delete</button>`;
+          html += `<td style="white-space:nowrap;">${approveReject} ${editDelete}</td>`;
+        } else if (table === 'employees' && user?.role === 'hr') {
+          // HR: Edit/Delete on Employees (using your existing request-based flows)
+          const actions = `
+            <button onclick="requestEdit('employees', ${row.id})">Edit</button>
+            <button onclick="requestDelete('employees', ${row.id})">Delete</button>`;
+          html += `<td>${actions}</td>`;
+        } else if (table === 'security_supervisors' && user?.role === 'admin') {
+          html += `<td>
+            <button onclick="editSupervisor(${row.id}, '${row.name}', '${row.username}', ${row.client_id}, '${row.site_name}')">Edit</button>
+            <button onclick="deleteSupervisor(${row.id})">Delete</button>
+          </td>`;
+        } else if (user?.role === 'accountant' && (table === 'clients' || table === 'deductions' || table === 'invoices' || table === 'salaries')) {
+          // Accountant keeps existing actions on these tables
+          let actions = `<button onclick="requestEdit('${table}', ${row.id})">Edit</button>
+                         <button onclick="requestDelete('${table}', ${row.id})">Delete</button>`;
+          if (table === 'clients') {
+            actions += ` <button onclick="showCategoryForm(${row.id})">Add Category</button>`;
+          }
+          html += `<td>${actions}</td>`;
+        } else {
+          html += '<td>-</td>';
         }
-        html += `<td>${actions}</td>`;
       }
 
       html += '</tr>';
     });
   } else {
-    const numCols =
-      (data.length > 0 ? Object.keys(data[0]).length : 1) +
-      ((table === 'attendances' && user?.role === 'hr') ||
-       (table === 'security_supervisors' && user?.role === 'admin') ||
-       (['accountant','hr'].includes(user?.role) && table !== 'attendances')
-        ? 1 : 0);
+    const numCols = (data.length > 0 ? Object.keys(data[0]).length : 1) + (shouldShowActions ? 1 : 0);
     html += `<tr><td colspan="${numCols}">No data found</td></tr>`;
   }
 
   html += '</table>';
   tableDiv.innerHTML = html;
 };
-
 
 // === Add these helpers anywhere after renderTable ===
 window.approveAttendance = async (id) => {
