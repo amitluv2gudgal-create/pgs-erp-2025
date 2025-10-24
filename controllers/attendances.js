@@ -28,7 +28,6 @@ router.get('/', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 /** Get a single attendance by id (HR/Admin/Accountant can use) */
 router.get('/:id', async (req, res) => {
   try {

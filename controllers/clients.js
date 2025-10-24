@@ -24,7 +24,6 @@ router.get('/', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 // Create client (accountant only)
 router.post('/', async (req, res) => {
   if (req.session.user.role !== 'accountant') return res.status(403).json({ error: 'Forbidden' });

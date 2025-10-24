@@ -1,4 +1,5 @@
 // server.js
+import cors from 'cors';
 import express from 'express';
 import session from 'express-session';
 import bodyParser from 'body-parser';
@@ -30,8 +31,17 @@ if (!SESSION_SECRET) {
   process.exit(1);
 }
 
+const ORIGIN = process.env.FRONTEND_ORIGIN || '';
+if (ORIGIN) {
+  app.use(cors({
+    origin: ORIGIN,
+    credentials: true
+  }));
+}
+
 // Trust Render / reverse proxy so secure cookies work correctly in prod
 app.set('trust proxy', 1);
+
 
 // Static + parsers
 app.use(bodyParser.json());
@@ -39,18 +49,17 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
 // Sessions
-// Sessions
 const isProd = process.env.NODE_ENV === 'production';
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
-    sameSite: 'lax',
     httpOnly: true,
-    maxAge: 1000 * 60 * 60 * 8,                 // 8 hours
-    secure: isProd && process.env.FORCE_HTTP !== '1' // ✅ not secure in dev
-  },
+    maxAge: 1000 * 60 * 60 * 8,
+    secure: isProd,                         // HTTPS on Render
+    sameSite: ORIGIN ? 'none' : 'lax'       // cross-site needs 'none'
+  }
 }));
 
 console.log('[boot] NODE_ENV:', process.env.NODE_ENV || '(unset)');
