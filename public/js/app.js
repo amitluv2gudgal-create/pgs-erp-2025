@@ -10,62 +10,242 @@ import { loadRequests } from './requests.js';
 let user; // Declare user globally
 
 document.addEventListener('DOMContentLoaded', async () => {
-  const res = await fetch('/api/auth/current-user');
-  if (!res.ok) {
-    window.location.href = '/login.html';
-    return; // Exit if not authenticated
-  }
-  user = await res.json(); // Assign the fetched user data
+  // ✅ Always include credentials so the server sees your session
+  const res = await fetch('/api/auth/me', { credentials: 'include' });
+if (!res.ok) {
+  window.location.href = '/login.html';
+  return;
+}
+user = await res.json();          
+window.user = user;
+ensurePasswordUI(user);
+
+
   if (!user || typeof user.role === 'undefined') {
     console.error('User data is invalid or missing role:', user);
     window.location.href = '/login.html';
     return;
   }
+
   const content = document.getElementById('content');
   content.innerHTML = `<h2>Welcome, ${user.role}</h2>`;
 
   // Buttons rendered based on role
-if (user.role !== 'security_supervisor') {
-  // Common: View tables (NOT for supervisor)
-  content.innerHTML += '<button onclick="showTable(\'clients\')">View Clients</button>';
-  content.innerHTML += '<button onclick="showTable(\'employees\')">View Employees</button>';
-  content.innerHTML += '<button onclick="showTable(\'attendances\')">View Attendances</button>';
-  content.innerHTML += '<button onclick="showTable(\'deductions\')">View Deductions</button>';
-  content.innerHTML += '<button onclick="showTable(\'invoices\')">View Invoices</button>';
-  content.innerHTML += '<button onclick="showTable(\'salaries\')">View Salaries</button>';
-}
+  if (user.role !== 'security_supervisor') {
+    content.innerHTML += '<button onclick="showTable(\'clients\')">View Clients</button>';
+    content.innerHTML += '<button onclick="showTable(\'employees\')">View Employees</button>';
+    content.innerHTML += '<button onclick="showTable(\'attendances\')">View Attendances</button>';
+    content.innerHTML += '<button onclick="showTable(\'deductions\')">View Deductions</button>';
+    content.innerHTML += '<button onclick="showTable(\'invoices\')">View Invoices</button>';
+    content.innerHTML += '<button onclick="showTable(\'salaries\')">View Salaries</button>';
+  }
 
-if (user.role === 'accountant') {
-  content.innerHTML += '<h3>Accountant Actions</h3>';
-  content.innerHTML += '<button onclick="showForm(\'client\')">Create Client</button>';
-  content.innerHTML += '<button onclick="showForm(\'deduction\')">Create Deduction</button>';
-  content.innerHTML += '<button onclick="showForm(\'invoice\')">Generate Invoice</button>';
-  content.innerHTML += '<button onclick="showForm(\'salary\')">Generate Salary</button>';
-} else if (user.role === 'hr') {
-  content.innerHTML += '<h3>HR Actions</h3>';
-  content.innerHTML += '<button onclick="showForm(\'employee\')">Create Employee</button>';
-  content.innerHTML += '<button onclick="showForm(\'attendance\')">Create Attendance</button>';
-} else if (user.role === 'admin') {
-  content.innerHTML += '<h3>Admin Actions</h3>';
-  content.innerHTML += '<button onclick="showPendingRequests()">View Pending Requests</button>';
-  content.innerHTML += '<button onclick="showSupervisorForm()">Create Security Supervisor</button>';
-  content.innerHTML += '<button onclick="showTable(\'security_supervisors\')">View Security Supervisors</button>';
-  document.getElementById('adminSection').style.display = 'block';
-} else if (user.role === 'security_supervisor') {
-  // Supervisor: ONLY submit attendance
-  content.innerHTML += '<button onclick="showAttendanceFormForSupervisor()">Submit Attendance</button>';
-}
+  if (user.role === 'accountant') {
+    content.innerHTML += '<h3>Accountant Actions</h3>';
+    content.innerHTML += '<button onclick="showForm(\'client\')">Create Client</button>';
+    content.innerHTML += '<button onclick="showForm(\'deduction\')">Create Deduction</button>';
+    content.innerHTML += '<button onclick="showForm(\'invoice\')">Generate Invoice</button>';
+    content.innerHTML += '<button onclick="showForm(\'salary\')">Generate Salary</button>';
+  } else if (user.role === 'hr') {
+    content.innerHTML += '<h3>HR Actions</h3>';
+    content.innerHTML += '<button onclick="showForm(\'employee\')">Create Employee</button>';
+    content.innerHTML += '<button onclick="showForm(\'attendance\')">Create Attendance</button>';
+  } else if (user.role === 'admin') {
+    content.innerHTML += '<h3>Admin Actions</h3>';
+    content.innerHTML += '<button onclick="showPendingRequests()">View Pending Requests</button>';
+    content.innerHTML += '<button onclick="showSupervisorForm()">Create Security Supervisor</button>';
+    content.innerHTML += '<button onclick="showTable(\'security_supervisors\')">View Security Supervisors</button>';
+    const adminSection = document.getElementById('adminSection');
+    if (adminSection) adminSection.style.display = 'block';
+  } else if (user.role === 'security_supervisor') {
+    content.innerHTML += '<button onclick="showAttendanceFormForSupervisor()">Submit Attendance</button>';
+  }
 
+  // ✅ Role-based top buttons if they exist in your HTML
+  const cpwBtn = document.getElementById('btn-change-password');
+  if (cpwBtn) {
+    cpwBtn.style.display = ['admin', 'hr', 'accountant'].includes(user.role) ? 'inline-block' : 'none';
+  }
+  const umBtn = document.getElementById('btn-user-mgmt');
+  if (umBtn) {
+    umBtn.style.display = (user.role === 'admin') ? 'inline-block' : 'none';
+  }
 
-  document.getElementById('logoutBtn').addEventListener('click', async () => {
-    try {
-      await fetch('/api/auth/logout');
-    } catch (err) {
-      console.error('Logout error:', err);
-    }
-    window.location.href = '/login.html';
-  });
+  // ✅ Logout should also include credentials
+  const logoutBtn = document.getElementById('logoutBtn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      try {
+        await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+      } catch (err) {
+        console.error('Logout error:', err);
+      }
+      window.location.href = '/login.html';
+    });
+  }
 });
+
+function ensurePasswordUI(user) {
+  const role = (user?.role || '').toLowerCase();
+  const canSelfChange = role === 'admin' || role === 'accountant' || role === 'hr';
+  const isAdmin = role === 'admin';
+
+  // --- Self Change Password (admins/accountants/hr only) ---
+  if (canSelfChange && !document.getElementById('pgs-change-password-btn')) {
+    const btn = document.createElement('button');
+    btn.id = 'pgs-change-password-btn';
+    btn.textContent = 'Change Password';
+    Object.assign(btn.style, commonFloatingStyle({ bottom: 16, right: 16 }));
+    btn.style.setProperty('color', '#111', 'important');
+    btn.style.setProperty('background', '#ffffff', 'important');
+    btn.style.setProperty('borderColor', '#d0d5dd', 'important');
+    btn.style.setProperty('fontWeight', '600', 'important');
+    btn.style.setProperty('letterSpacing', '0.2px', 'important');
+    document.body.appendChild(btn);
+    const modal = buildSelfChangeModal();
+    document.body.appendChild(modal);
+    btn.addEventListener('click', () => { modal.style.display = 'flex'; });
+  }
+
+  // --- Admin Reset Others' Passwords ---
+  if (isAdmin && !document.getElementById('pgs-admin-reset-btn')) {
+    const btn2 = document.createElement('button');
+    btn2.id = 'pgs-admin-reset-btn';
+    btn2.textContent = 'Reset User Password';
+    Object.assign(btn2.style, commonFloatingStyle({ bottom: 64, right: 16 }));
+    btn2.style.setProperty('color', '#111', 'important');
+    btn2.style.setProperty('background', '#ffffff', 'important');
+    btn2.style.setProperty('borderColor', '#d0d5dd', 'important');
+    btn2.style.setProperty('fontWeight', '600', 'important');
+    btn2.style.setProperty('letterSpacing', '0.2px', 'important');
+    document.body.appendChild(btn2);
+    const modal2 = buildAdminResetModal();
+    document.body.appendChild(modal2);
+    btn2.addEventListener('click', () => { modal2.style.display = 'flex'; });
+  }
+
+  // Supervisors: see nothing.
+}
+
+function commonFloatingStyle({ bottom, right }) {
+  return {
+    position: 'fixed', zIndex: '9999', cursor: 'pointer',
+    padding: '10px 14px', fontSize: '14px', borderRadius: '10px',
+    border: '1px solid #ccc', background: '#fff',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+    bottom: `${bottom}px`, right: `${right}px`
+  };
+}
+
+function buildSelfChangeModal() {
+  const modal = document.createElement('div');
+  Object.assign(modal.style, { position:'fixed', inset:'0', background:'rgba(0,0,0,0.4)', display:'none',
+    alignItems:'center', justifyContent:'center', zIndex:'10000' });
+  modal.innerHTML = `
+    <div style="width:320px;background:#fff;border-radius:12px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,0.2)">
+      <h3 style="margin:0 0 12px;font-size:16px;">Change Password</h3>
+      <label style="display:block;margin-bottom:8px;">
+        <span style="display:block;font-size:12px;margin-bottom:4px;">Current password</span>
+        <input type="password" id="cp-current" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:8px;">
+      </label>
+      <label style="display:block;margin-bottom:8px;">
+        <span style="display:block;font-size:12px;margin-bottom:4px;">New password</span>
+        <input type="password" id="cp-new" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:8px;">
+      </label>
+      <label style="display:block;margin-bottom:12px;">
+        <span style="display:block;font-size:12px;margin-bottom:4px;">Confirm new password</span>
+        <input type="password" id="cp-confirm" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:8px;">
+      </label>
+      <div id="cp-msg" style="min-height:18px;font-size:12px;color:#c00;margin-bottom:8px;"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="cp-cancel" style="padding:8px 12px;border:1px solid #0a7;border-radius:8px;background:#f5f5f5;cursor:pointer;">Cancel</button>
+        <button id="cp-save" style="padding:8px 12px;border:1px solid #0a7;border-radius:8px;background:#0db;cursor:pointer;">Save</button>
+      </div>
+    </div>`;
+    
+    const card = modal.firstElementChild;
+    card.querySelector('#cp-cancel').addEventListener('click', () => { modal.style.display = 'none'; });
+    card.querySelector('#cp-save').addEventListener('click', async () => {
+    const current = card.querySelector('#cp-current').value.trim();
+    const next = card.querySelector('#cp-new').value.trim();
+    const confirm = card.querySelector('#cp-confirm').value.trim();
+    const msg = card.querySelector('#cp-msg');
+    if (!current || !next || !confirm) return msg.textContent = 'All fields are required.';
+    if (next !== confirm) return msg.textContent = 'New passwords do not match.';
+    if (next.length < 6) return msg.textContent = 'Password must be at least 6 characters.';
+
+    msg.textContent = '';
+    const res = await fetch('/api/auth/change-password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ currentPassword: current, newPassword: next })
+    });
+
+    const data = await res.json().catch(()=>({}));
+    if (!res.ok) { msg.textContent = data?.error || 'Failed'; return; }
+    msg.style.color = '#0a7'; msg.textContent = 'Password changed.';
+    setTimeout(()=>{ modal.style.display='none'; }, 800);
+    card.querySelector('#cp-current').value = '';
+    card.querySelector('#cp-new').value = '';
+    card.querySelector('#cp-confirm').value = '';
+  });
+  return modal;
+}
+
+function buildAdminResetModal() {
+  const modal = document.createElement('div');
+  Object.assign(modal.style, { position:'fixed', inset:'0', background:'rgba(0,0,0,0.4)', display:'none',
+    alignItems:'center', justifyContent:'center', zIndex:'10000' });
+  modal.innerHTML = `
+    <div style="width:360px;background:#fff;border-radius:12px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,0.2)">
+      <h3 style="margin:0 0 12px;font-size:16px;">Admin: Reset User Password</h3>
+      <p style="margin:0 0 8px;font-size:12px;color:#555;">Provide <strong>either</strong> User ID or Username.</p>
+      <label style="display:block;margin-bottom:8px;">
+        <span style="display:block;font-size:12px;margin-bottom:4px;">User ID</span>
+        <input type="number" id="arp-id" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:8px;">
+      </label>
+      <label style="display:block;margin-bottom:8px;">
+        <span style="display:block;font-size:12px;margin-bottom:4px;">Username</span>
+        <input type="text" id="arp-username" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:8px;">
+      </label>
+      <label style="display:block;margin-bottom:12px;">
+        <span style="display:block;font-size:12px;margin-bottom:4px;">New password</span>
+        <input type="password" id="arp-new" style="width:100%;padding:8px;border:1px solid #ccc;border-radius:8px;">
+      </label>
+      <div id="arp-msg" style="min-height:18px;font-size:12px;color:#c00;margin-bottom:8px;"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="arp-cancel" style="padding:8px 12px;border:1px solid #ccc;border-radius:8px;background:#f5f5f5;cursor:pointer;">Cancel</button>
+        <button id="arp-save" style="padding:8px 12px;border:1px solid #0a7;border-radius:8px;background:#0db;cursor:pointer;">Reset</button>
+      </div>
+    </div>`;
+
+    const card = modal.firstElementChild;
+    card.querySelector('#arp-cancel').addEventListener('click', () => { modal.style.display = 'none'; });
+    card.querySelector('#arp-save').addEventListener('click', async () => {
+    const id = card.querySelector('#arp-id').value.trim();
+    const username = card.querySelector('#arp-username').value.trim();
+    const next = card.querySelector('#arp-new').value.trim();
+    const msg = card.querySelector('#arp-msg');
+
+    if (!id && !username) return msg.textContent = 'Enter User ID or Username.';
+    if (!next || next.length < 6) return msg.textContent = 'Password must be at least 6 characters.';
+
+    msg.textContent = '';
+    const res = await fetch('/api/admin/reset-password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ userId: id ? Number(id) : undefined, username: username || undefined, newPassword: next })
+    });
+    const data = await res.json().catch(()=>({}));
+    if (!res.ok) { msg.textContent = data?.error || 'Failed'; return; }
+    msg.style.color = '#0a7'; msg.textContent = 'Password reset.';
+    setTimeout(()=>{ modal.style.display='none'; }, 800);
+    card.querySelector('#arp-id').value = '';
+    card.querySelector('#arp-username').value = '';
+    card.querySelector('#arp-new').value = '';
+  });
+  return modal;
+}
 
 window.showForm = (type) => {
   if (type === 'client') window.showClientForm && window.showClientForm();
@@ -749,5 +929,126 @@ window.deleteSupervisor = async (id) => {
     } else {
       alert((await response.json()).error || 'Failed to delete supervisor');
     }
+  }
+};
+
+window.openUserManagement = async function() {
+  if (window.user?.role !== 'admin') { alert('Admin only'); return; }
+
+  let data;
+  try {
+    const r = await fetch('/api/auth/admin/users', { credentials: 'include' });
+    if (!r.ok) throw new Error(await r.text());
+    data = await r.json(); // { users: [...], supervisors: [...] }
+  } catch (e) {
+    console.error('Load users error:', e);
+    alert('Failed to load users');
+    return;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'um-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:9999;display:flex;align-items:center;justify-content:center';
+
+  const card = document.createElement('div');
+  card.style.cssText = 'background:#fff;min-width:380px;max-width:760px;padding:16px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);max-height:80vh;overflow:auto';
+
+  const usersRows = (data.users || []).map(u => `
+    <tr>
+      <td>${u.id}</td>
+      <td>${escapeHtml(u.username)}</td>
+      <td>${u.role}</td>
+      <td>
+        <input type="password" id="newpass_user_${u.id}" placeholder="New password (min 6)">
+        <button onclick="resetUserPass(${u.id})">Reset</button>
+      </td>
+    </tr>
+  `).join('');
+
+  const supRows = (data.supervisors || []).map(s => `
+    <tr>
+      <td>${s.id}</td>
+      <td>${escapeHtml(s.username)}</td>
+      <td>${escapeHtml(s.name || '')}</td>
+      <td>${s.client_id ?? ''}</td>
+      <td>${escapeHtml(s.site_name || '')}</td>
+      <td>
+        <input type="password" id="newpass_sup_${s.id}" placeholder="New password (min 6)">
+        <button onclick="resetSupervisorPass(${s.id})">Reset</button>
+      </td>
+    </tr>
+  `).join('');
+
+  card.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <h3 style="margin:0;">User Management (Admin)</h3>
+      <button id="um-close" style="border:none;background:transparent;font-size:20px;cursor:pointer">&times;</button>
+    </div>
+
+    <h4>Users (admin / accountant / hr)</h4>
+    <table border="1" cellspacing="0" cellpadding="4" style="width:100%;margin-bottom:12px;">
+      <tr><th>ID</th><th>Username</th><th>Role</th><th>Reset Password</th></tr>
+      ${usersRows || '<tr><td colspan="4">No users</td></tr>'}
+    </table>
+
+    <h4>Security Supervisors</h4>
+    <table border="1" cellspacing="0" cellpadding="4" style="width:100%;">
+      <tr><th>ID</th><th>Username</th><th>Name</th><th>Client ID</th><th>Site</th><th>Reset Password</th></tr>
+      ${supRows || '<tr><td colspan="6">No supervisors</td></tr>'}
+    </table>
+  `;
+
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  document.getElementById('um-close').onclick = () => overlay.remove();
+
+  window.resetUserPass = async (id) => {
+    const input = document.getElementById(`newpass_user_${id}`);
+    const new_password = input?.value?.trim();
+    if (!new_password || new_password.length < 6) return alert('Enter a password with at least 6 characters');
+    try {
+      const r = await fetch(`/api/auth/admin/users/${id}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ new_password })
+      });
+      if (!r.ok) throw new Error(await r.text());
+      alert('Password reset for user');
+      input.value = '';
+    } catch (e) {
+      console.error('resetUserPass error:', e);
+      alert('Failed to reset user password');
+    }
+  };
+
+  window.resetSupervisorPass = async (id) => {
+    const input = document.getElementById(`newpass_sup_${id}`);
+    const new_password = input?.value?.trim();
+    if (!new_password || new_password.length < 6) return alert('Enter a password with at least 6 characters');
+    try {
+      const r = await fetch(`/api/auth/admin/supervisors/${id}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ new_password })
+      });
+      if (!r.ok) throw new Error(await r.text());
+      alert('Password reset for supervisor');
+      input.value = '';
+    } catch (e) {
+      console.error('resetSupervisorPass error:', e);
+      alert('Failed to reset supervisor password');
+    }
+  };
+
+  function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
   }
 };

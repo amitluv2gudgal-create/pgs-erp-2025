@@ -14,10 +14,13 @@ import salaryRoutes from './controllers/salaries.js';
 import requestRoutes from './controllers/requests.js';
 import securitySupervisorRoutes from './controllers/security_supervisors.js';
 import { forbidSupervisorGet } from './middleware/forbidSupervisorGet.js';
+import { DB_FILE } from './db.js';
 
 dotenv.config();
 
 const app = express();
+
+console.log('[db] Using:', DB_FILE);
 
 // ---------- Core config ----------
 const PORT = process.env.PORT || 3000;
@@ -36,18 +39,24 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
 // Sessions
-app.use(
-  session({
-    secret: SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      // In production (Render), cookies are secure over HTTPS.
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-    },
-  })
-);
+// Sessions
+const isProd = process.env.NODE_ENV === 'production';
+app.use(session({
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    sameSite: 'lax',
+    httpOnly: true,
+    maxAge: 1000 * 60 * 60 * 8,                 // 8 hours
+    secure: isProd && process.env.FORCE_HTTP !== '1' // ✅ not secure in dev
+  },
+}));
+
+console.log('[boot] NODE_ENV:', process.env.NODE_ENV || '(unset)');
+console.log('[boot] cookie.secure =', isProd && process.env.FORCE_HTTP !== '1');
+
+
 
 // ---------- DB init BEFORE routes ----------
 (async () => {
@@ -79,6 +88,12 @@ app.use(
   app.use('/api/invoices', forbidSupervisorGet);
   app.use('/api/salaries', forbidSupervisorGet);
   app.use('/api/deductions', forbidSupervisorGet);
+
+  app.use((req, _res, next) => {
+  console.log('[session]', req.sessionID, req.session?.user || 'no-user');
+  next();
+});
+
 
   // Protected API routes
   app.use('/api/clients', clientRoutes);

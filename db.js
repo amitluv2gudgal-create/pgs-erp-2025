@@ -1,20 +1,21 @@
-// db.js  — robust SQLite with persistent disk + singleton connection
+// db.js — robust SQLite with persistent disk + singleton connection (ESM)
 import fs from 'fs';
 import path from 'path';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 
-const DEFAULT_DB_PATH = path.resolve('./data/database.db'); // local default
-const DB_FILE = process.env.DATABASE_FILE || DEFAULT_DB_PATH;
+// ---- Resolve a single absolute DB path (stable across CWDs) ----
+const DEFAULT_DB_PATH = path.resolve(process.cwd(), 'data', 'database.db'); // e.g. C:\...\PGS-ERP\data\database.db
+export const DB_FILE = process.env.DATABASE_FILE ? path.resolve(process.cwd(), process.env.DATABASE_FILE) : DEFAULT_DB_PATH;
 
-let db; // singleton connection
+let db; // singleton
 
 async function ensureFolderAndMigrateLegacy() {
   const dir = path.dirname(DB_FILE);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-  // One-time migration: if DB_FILE doesn't exist but legacy "./database.db" does, copy it over.
-  const legacyPath = path.resolve('./database.db');
+  // One-time migration: if DB_FILE doesn't exist but legacy "./database.db" exists, copy it.
+  const legacyPath = path.resolve(process.cwd(), 'database.db');
   if (!fs.existsSync(DB_FILE) && fs.existsSync(legacyPath)) {
     try {
       fs.copyFileSync(legacyPath, DB_FILE);
@@ -25,8 +26,23 @@ async function ensureFolderAndMigrateLegacy() {
   }
 }
 
+// Optional: create helpful indexes (idempotent in SQLite)
+async function ensureIndexes(conn) {
+  await conn.exec(`
+    CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+    CREATE INDEX IF NOT EXISTS idx_client_categories_client ON client_categories(client_id);
+    CREATE INDEX IF NOT EXISTS idx_employees_client ON employees(client_id);
+    CREATE INDEX IF NOT EXISTS idx_attendances_employee ON attendances(employee_id);
+    CREATE INDEX IF NOT EXISTS idx_attendances_client ON attendances(client_id);
+    CREATE INDEX IF NOT EXISTS idx_deductions_employee ON deductions(employee_id);
+    CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id);
+    CREATE INDEX IF NOT EXISTS idx_salaries_employee ON salaries(employee_id);
+    CREATE INDEX IF NOT EXISTS idx_security_supervisors_client ON security_supervisors(client_id);
+  `);
+}
+
 export async function initDB() {
-  if (db) return db; // already opened
+  if (db) return db;
 
   await ensureFolderAndMigrateLegacy();
 
@@ -35,9 +51,10 @@ export async function initDB() {
     driver: sqlite3.Database
   });
 
-  // Stability PRAGMAs
-  await db.exec('PRAGMA journal_mode = WAL;');
-  await db.exec('PRAGMA busy_timeout = 5000;'); // ms
+  // Stability & safety
+  await db.exec('PRAGMA journal_mode = WAL;');     // better durability & concurrency
+  await db.exec('PRAGMA foreign_keys = ON;');      // enforce FK constraints
+  await db.exec('PRAGMA busy_timeout = 5000;');    // avoid "database is locked" in bursts
 
   // Tables: ONLY create if not exists (never drop on boot)
   await db.exec(`
@@ -92,14 +109,13 @@ export async function initDB() {
       FOREIGN KEY(client_id) REFERENCES clients(id)
     );
 
-    -- NOTE: 'submitted_by' was INTEGER in your file; you store 'hr'/'supervisor' as text.
-    -- SQLite is flexible, but we keep column as TEXT to match usage and avoid confusion.
+    -- 'submitted_by' stored as TEXT (e.g., 'hr', 'supervisor')
     CREATE TABLE IF NOT EXISTS attendances (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       employee_id INTEGER,
       date TEXT,
       present INTEGER,                -- 0/1/2 supported
-      submitted_by TEXT,              -- 'hr' or 'supervisor'
+      submitted_by TEXT,              -- 'hr' | 'supervisor'
       client_id INTEGER,
       status TEXT DEFAULT 'pending',  -- 'pending'|'verified'|'rejected'
       FOREIGN KEY(employee_id) REFERENCES employees(id),
@@ -168,10 +184,13 @@ export async function initDB() {
     );
   `);
 
+  await ensureIndexes(db);
+
   console.log('[db] SQLite initialized at', DB_FILE);
   return db;
 }
 
+// Simple helpers
 export async function query(sql, params = []) {
   const conn = await initDB();
   return conn.all(sql, params);
@@ -183,11 +202,15 @@ export async function run(sql, params = []) {
   try {
     await stmt.bind(params);
     const result = await stmt.run();
-    // result.lastID is the inserted row id (when applicable)
-    return { insertId: result?.lastID ?? null, lastID: result?.lastID ?? null, changes: result?.changes ?? 0 };
+    // Normalize return object
+    return {
+      insertId: result?.lastID ?? null,
+      lastID: result?.lastID ?? null,
+      changes: result?.changes ?? 0
+    };
   } finally {
     await stmt.finalize();
   }
 }
 
-export default { initDB, query, run };
+export default { initDB, query, run, DB_FILE };
