@@ -21,7 +21,9 @@ dotenv.config();
 
 const app = express();
 
-console.log('[db] Using:', DB_FILE);
+console.log('[db] Using file:', DB_FILE);
+app.get('/api/debug/db-path', (_req, res) => res.json({ DB_FILE }));
+
 
 // ---------- Core config ----------
 const PORT = process.env.PORT || 3000;
