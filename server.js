@@ -15,31 +15,41 @@ import requestRoutes from './controllers/requests.js';
 import securitySupervisorRoutes from './controllers/security_supervisors.js';
 import { forbidSupervisorGet } from './middleware/forbidSupervisorGet.js';
 
+dotenv.config();
+
 const app = express();
 
-// Load environment variables
-dotenv.config();
-const { SESSION_SECRET, PORT: envPort } = process.env;
+// ---------- Core config ----------
+const PORT = process.env.PORT || 3000;
+const SESSION_SECRET = process.env.SESSION_SECRET;
 if (!SESSION_SECRET) {
-  console.error('Error: SESSION_SECRET is not defined in .env');
+  console.error('Error: SESSION_SECRET is not defined in environment variables.');
   process.exit(1);
 }
 
+// Trust Render / reverse proxy so secure cookies work correctly in prod
+app.set('trust proxy', 1);
+
+// Static + parsers
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
-// Session middleware
-app.use(session({
-  secret: SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  cookie: { secure: false } // Set to true if using HTTPS
-}));
+// Sessions
+app.use(
+  session({
+    secret: SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      // In production (Render), cookies are secure over HTTPS.
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+    },
+  })
+);
 
-
-
-// Initialize database (await to ensure completion)
+// ---------- DB init BEFORE routes ----------
 (async () => {
   try {
     await initDB();
@@ -48,43 +58,43 @@ app.use(session({
     console.error('Database initialization error:', err);
     process.exit(1);
   }
+
+  // ---------- Routes ----------
+  // Public auth routes
+  app.use('/api/auth', authRoutes);
+
+  // Require auth for the rest of /api
+  const requireAuth = (req, res, next) => {
+    // Allow login-related endpoints
+    if (req.path.startsWith('/auth/')) return next();
+    if (!req.session?.user) return res.status(401).json({ error: 'Unauthorized' });
+    next();
+  };
+  app.use('/api', requireAuth);
+
+  // Endpoint-specific GET restrictions for supervisors (after auth)
+  app.use('/api/clients', forbidSupervisorGet);
+  app.use('/api/employees', forbidSupervisorGet);
+  app.use('/api/attendances', forbidSupervisorGet);
+  app.use('/api/invoices', forbidSupervisorGet);
+  app.use('/api/salaries', forbidSupervisorGet);
+  app.use('/api/deductions', forbidSupervisorGet);
+
+  // Protected API routes
+  app.use('/api/clients', clientRoutes);
+  app.use('/api/employees', employeeRoutes);
+  app.use('/api/attendances', attendanceRoutes);
+  app.use('/api/deductions', deductionRoutes);
+  app.use('/api/invoices', invoiceRoutes);
+  app.use('/api/salaries', salaryRoutes);
+  app.use('/api/requests', requestRoutes);
+  app.use('/api/security-supervisors', securitySupervisorRoutes);
+
+  // Root → login
+  app.get('/', (req, res) => res.redirect('/login.html'));
+  app.get('/favicon.ico', (req, res) => res.status(204).end());
+
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
 })();
-
-// Routes
-app.use('/api/auth', authRoutes); // Exempt from requireAuth
-app.use('/api/clients', clientRoutes);
-app.use('/api/employees', employeeRoutes);
-app.use('/api/attendances', attendanceRoutes);
-app.use('/api/deductions', deductionRoutes);
-app.use('/api/invoices', invoiceRoutes);
-app.use('/api/salaries', salaryRoutes);
-app.use('/api/requests', requestRoutes);
-app.use('/api/security-supervisors', securitySupervisorRoutes);
-app.use('/api/clients', forbidSupervisorGet);
-app.use('/api/employees', forbidSupervisorGet);
-app.use('/api/attendances', forbidSupervisorGet);
-app.use('/api/invoices', forbidSupervisorGet);
-app.use('/api/salaries', forbidSupervisorGet);
-app.use('/api/deductions', forbidSupervisorGet);
-
-// Authentication middleware (applied to all /api routes except /api/auth)
-const requireAuth = (req, res, next) => {
-  if (req.path === '/auth/login' || req.path === '/auth/current-user') {
-    return next(); // Allow login and current-user routes without authentication
-  }
-  if (!req.session.user) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  next();
-};
-app.use('/api', requireAuth);
-
-// Redirect root to login
-app.get('/', (req, res) => res.redirect('/login.html'));
-
-app.get('/favicon.ico', (req, res) => res.status(204).end());
-
-const PORT = envPort || 3000; // Use the destructured envPort with fallback
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
