@@ -2,9 +2,7 @@
   "name": "pgs-erp",
   "version": "1.0.0",
   "type": "module",
-  "engines": {
-    "node": "20.x"
-  },
+  "engines": { "node": "20.x" },
   "scripts": {
     "start": "node server.js"
   },
@@ -14,7 +12,8 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "express-session": "^1.17.3",
-    "sqlite": "^5.1.6",
+    "sqlite": "^5.1.1",
     "sqlite3": "^5.1.7"
   }
 }
+
