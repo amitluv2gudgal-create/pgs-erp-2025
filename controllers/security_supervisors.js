@@ -1,7 +1,8 @@
 // controllers/security_supervisors.js
 import express from 'express';
 import { query, run } from '../db.js';
-import { hash } from 'bcryptjs';
+import pkg from 'bcryptjs';
+const { hash } = pkg
 
 const router = express.Router();
 
