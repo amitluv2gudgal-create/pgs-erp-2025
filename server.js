@@ -4,7 +4,6 @@ import express from 'express';
 import session from 'express-session';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
-import { initDB } from './db.js';
 import authRoutes from './controllers/auth.js';
 import clientRoutes from './controllers/clients.js';
 import employeeRoutes from './controllers/employees.js';
