@@ -2,7 +2,7 @@
 import express from 'express';
 import { query, run } from '../db.js';
 import { generateInvoicePDF, generateAttendanceChartPDF } from '../utils/pdf.js';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 const router = express.Router();
 
@@ -188,8 +188,8 @@ router.post('/', async (req, res) => {
     });
 
     // 4) Append chart pages to invoice
-    const mainDoc = await PDFDocument.load(invoicePDF);
-    const chartDoc = await PDFDocument.load(chartPDF);
+    const mainDoc = await ( PDFDocument, StandardFonts, rgb ).load(invoicePDF);
+    const chartDoc = await ( PDFDocument, StandardFonts, rgb ).load(chartPDF);
     const chartPages = await mainDoc.copyPages(chartDoc, chartDoc.getPageIndices());
     chartPages.forEach(p => mainDoc.addPage(p));
     const combined = await mainDoc.save();
