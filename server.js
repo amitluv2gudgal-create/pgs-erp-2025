@@ -16,11 +16,13 @@ import requestRoutes from './controllers/requests.js';
 import securitySupervisorRoutes from './controllers/security_supervisors.js';
 import { forbidSupervisorGet } from './middleware/forbidSupervisorGet.js';
 import { DB_FILE } from './db.js';
+import { DB_URL } from './db.js';
 
 dotenv.config();
 
 const app = express();
 
+console.log('[db] Using Postgres URL host:', DB_URL ? new URL(DB_URL).host : '(unset)');
 console.log('[db] Using file:', DB_FILE);
 app.get('/api/debug/db-path', (_req, res) => res.json({ DB_FILE }));
 
