@@ -24,50 +24,55 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Username and password are required' });
     }
 
-    // 1) Try users table (admin/hr/accountant)
-    const users = await query('SELECT * FROM users WHERE username = ?', [username]);
+    console.log('[auth] login attempt:', username);
+
+    // Try users
+    const users = await query('SELECT * FROM users WHERE username = $1', [username]); // if you’ve changed to PG param style
     if (users.length) {
       const u = users[0];
       const ok = await bcrypt.compare(password, u.password || '');
       if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
-      const role = normRole(u.role);
+      const role = String(u.role || '').toLowerCase();
       req.session.user = { id: u.id, role, username: u.username };
+
       return req.session.save((err) => {
         if (err) {
-          console.error('Session save error:', err);
+          console.error('[auth] session save error:', err);
           return res.status(500).json({ error: 'Session error' });
         }
-        console.log('[auth] login OK ->', { sessionID: req.sessionID, id: u.id, role, username: u.username });
+        console.log('[auth] login OK (users):', { id: u.id, role, username: u.username });
         res.json({ ok: true, role });
       });
     }
 
-    // 2) Try security_supervisors table
-    const sups = await query('SELECT * FROM security_supervisors WHERE username = ?', [username]);
+    // Try supervisors
+    const sups = await query('SELECT * FROM security_supervisors WHERE username = $1', [username]);
     if (sups.length) {
       const s = sups[0];
       const ok = await bcrypt.compare(password, s.password || '');
       if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
-      const role = 'security_supervisor'; // keep consistent across app
+      const role = 'security_supervisor';
       req.session.user = { id: s.id, role, username: s.username };
+
       return req.session.save((err) => {
         if (err) {
-          console.error('Session save error:', err);
+          console.error('[auth] session save error (sup):', err);
           return res.status(500).json({ error: 'Session error' });
         }
-        console.log('[auth] login OK ->', { sessionID: req.sessionID, id: s.id, role, username: s.username });
+        console.log('[auth] login OK (sup):', { id: s.id, role, username: s.username });
         res.json({ ok: true, role });
       });
     }
 
     return res.status(401).json({ error: 'Invalid credentials' });
   } catch (err) {
-    console.error('POST /api/auth/login error:', err);
+    console.error('[auth] /login error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 
 /** Logout */
 router.post('/logout', (req, res) => {
