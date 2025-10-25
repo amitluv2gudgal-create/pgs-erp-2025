@@ -1,42 +1,30 @@
 // public/js/auth.js
-document.addEventListener('DOMContentLoaded', () => {
-  const form = document.getElementById('loginForm');
-  if (!form) return;
+document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const username = form.username.value.trim();
+  const password = form.password.value.trim();
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ username, password })
+    });
 
-    const username = document.getElementById('username')?.value?.trim();
-    const password = document.getElementById('password')?.value || '';
+    const ct = res.headers.get('content-type') || '';
+    const payload = ct.includes('application/json') ? await res.json() : { error: await res.text() };
 
-    if (!username || !password) {
-      alert('Please enter username and password');
+    if (!res.ok) {
+      alert(payload?.error || `Login failed (${res.status})`);
       return;
     }
 
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',              // ✅ send/receive session cookie
-        body: JSON.stringify({ username, password })
-      });
-
-      if (!res.ok) {
-        let msg = '';
-        try { msg = (await res.json()).error; } catch { msg = await res.text(); }
-        throw new Error(msg || 'Login failed');
-      }
-
-      const data = await res.json();
-      // Optional: keep role in localStorage for quick UI decisions
-      if (data?.role) localStorage.setItem('userRole', data.role);
-
-      // Go to dashboard
-      window.location.href = '/index.html';
-    } catch (err) {
-      console.error('Login error:', err);
-      alert(err.message || 'Login failed');
-    }
-  });
+    // success
+    window.location.href = '/';
+  } catch (err) {
+    console.error('Login error:', err);
+    alert('Network or server error during login.');
+  }
 });
