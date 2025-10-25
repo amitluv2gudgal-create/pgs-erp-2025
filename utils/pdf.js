@@ -1,5 +1,5 @@
 // utils/pdf.js (corrected)
-import PDFDocument from 'pdfkit';
+import PDFDocument from 'pdf-lib';
 
 export const generateInvoicePDF = (client, month, categoryData, subtotal, service_charges, total, cgst_amount, sgst_amount, grand_total, invoiceNo, invoiceDate, invoiceMonth) => {
   return new Promise((resolve, reject) => {
