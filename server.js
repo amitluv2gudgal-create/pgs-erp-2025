@@ -15,7 +15,6 @@ import salaryRoutes from './controllers/salaries.js';
 import requestRoutes from './controllers/requests.js';
 import securitySupervisorRoutes from './controllers/security_supervisors.js';
 import { forbidSupervisorGet } from './middleware/forbidSupervisorGet.js';
-import { DB_FILE } from './db.js';
 import { DB_URL } from './db.js';
 
 dotenv.config();
