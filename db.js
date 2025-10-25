@@ -13,6 +13,12 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false } // Neon requires SSL
 });
 
+if (!DB_URL) {
+  console.error('[db] DATABASE_URL is not set. Configure it in Render → Environment.');
+  process.exit(1); // stop trying localhost:5432
+}
+
+
 // Ensure schema once
 let booted = false;
 async function ensureSchema() {
