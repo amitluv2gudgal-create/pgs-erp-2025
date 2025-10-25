@@ -1,16 +1,20 @@
 // controllers/auth.js
 import express from 'express';
-import bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import { query, run } from '../db.js';
 
 const router = express.Router();
+
+// Normalize role helper (lowercase string)
+function normRole(role) {
+  return String(role || '').toLowerCase();
+}
 
 // Who am I
 router.get('/me', (req, res) => {
   if (req.session?.user) return res.json(req.session.user);
   return res.status(401).json({ error: 'Unauthorized' });
 });
-
 
 /** Login: supports users (admin/hr/accountant) and security supervisors */
 router.post('/login', async (req, res) => {
@@ -27,14 +31,15 @@ router.post('/login', async (req, res) => {
       const ok = await bcrypt.compare(password, u.password || '');
       if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
-      req.session.user = { id: u.id, role: u.role, username: u.username };
+      const role = normRole(u.role);
+      req.session.user = { id: u.id, role, username: u.username };
       return req.session.save((err) => {
         if (err) {
           console.error('Session save error:', err);
           return res.status(500).json({ error: 'Session error' });
-          console.log('[auth] login OK -> sessionID:', req.sessionID, 'user:', req.session.user);
         }
-        res.json({ ok: true, role: u.role });
+        console.log('[auth] login OK ->', { sessionID: req.sessionID, id: u.id, role, username: u.username });
+        res.json({ ok: true, role });
       });
     }
 
@@ -45,13 +50,15 @@ router.post('/login', async (req, res) => {
       const ok = await bcrypt.compare(password, s.password || '');
       if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
-      req.session.user = { id: s.id, role: 'security_supervisor', username: s.username };
+      const role = 'security_supervisor'; // keep consistent across app
+      req.session.user = { id: s.id, role, username: s.username };
       return req.session.save((err) => {
         if (err) {
           console.error('Session save error:', err);
           return res.status(500).json({ error: 'Session error' });
         }
-        res.json({ ok: true, role: 'security_supervisor' });
+        console.log('[auth] login OK ->', { sessionID: req.sessionID, id: s.id, role, username: s.username });
+        res.json({ ok: true, role });
       });
     }
 
@@ -70,38 +77,36 @@ router.post('/logout', (req, res) => {
       console.warn('Session destroy error:', err);
       return res.status(500).json({ error: 'Logout error' });
     }
-    // Let the client drop any local state
     res.json({ ok: true });
   });
 });
 
-
 // GET /current-user handler
 router.get('/current-user', (req, res) => {
-  if (req.session?.user) {
-    res.json(req.session.user);
-  } else {
-    res.status(401).json({ error: 'Unauthorized' });
-  }
+  if (req.session?.user) return res.json(req.session.user);
+  return res.status(401).json({ error: 'Unauthorized' });
 });
 
 function requireAuth(req, res, next) {
   if (!req.session?.user) return res.status(401).json({ error: 'Unauthorized' });
+  // normalize role once on the request
+  req.session.user.role = normRole(req.session.user.role);
   next();
 }
 
 function requireAdmin(req, res, next) {
-  if (!req.session?.user || req.session.user.role !== 'admin') {
+  if (!req.session?.user || normRole(req.session.user.role) !== 'admin') {
     return res.status(403).json({ error: 'Admin only' });
   }
   next();
 }
 
 /** List all app users and supervisors (no passwords returned) */
-router.get('/admin/users', requireAdmin, async (req, res) => {
+router.get('/admin/users', requireAdmin, async (_req, res) => {
   try {
     const users = await query(`SELECT id, username, role FROM users ORDER BY role, username`);
     const supervisors = await query(`SELECT id, username, name, client_id, site_name FROM security_supervisors ORDER BY username`);
+    res.set('Cache-Control', 'no-store');
     res.json({ users, supervisors });
   } catch (err) {
     console.error('GET /api/auth/admin/users error:', err);
@@ -109,13 +114,14 @@ router.get('/admin/users', requireAdmin, async (req, res) => {
   }
 });
 
+/** Self change password (admin/accountant/hr only) */
 router.post('/change-password', requireAuth, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body || {};
-    const allowed = new Set(['admin','accountant','hr']);        // 🚫 supervisors excluded
-    if (!allowed.has(req.session.user.role)) {
-      return res.status(403).json({ error: 'Not allowed for your role' });
-    }
+    const role = normRole(req.session.user.role);
+    const allowed = new Set(['admin', 'accountant', 'hr']); // 🚫 supervisors excluded
+    if (!allowed.has(role)) return res.status(403).json({ error: 'Not allowed for your role' });
+
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ error: 'currentPassword and newPassword are required' });
     }
@@ -181,7 +187,7 @@ router.post('/admin/supervisors/:id/reset-password', requireAdmin, async (req, r
   }
 });
 
-// POST /api/admin/reset-password  { userId?: number, username?: string, newPassword: string }
+// Generic admin reset by userId or username
 router.post('/admin/reset-password', requireAdmin, async (req, res) => {
   try {
     const { userId, username, newPassword } = req.body || {};
@@ -202,7 +208,7 @@ router.post('/admin/reset-password', requireAdmin, async (req, res) => {
     const hash = await bcrypt.hash(newPassword, 10);
     await run('UPDATE users SET password = ? WHERE id = ?', [hash, targetId]);
 
-    // (Optional) minimal audit trail
+    // Minimal audit
     await run(`
       CREATE TABLE IF NOT EXISTS admin_password_resets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -211,10 +217,7 @@ router.post('/admin/reset-password', requireAdmin, async (req, res) => {
         at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    await run(
-      'INSERT INTO admin_password_resets (admin_id, target_user_id) VALUES (?, ?)',
-      [req.session.user.id, targetId]
-    );
+    await run('INSERT INTO admin_password_resets (admin_id, target_user_id) VALUES (?, ?)', [req.session.user.id, targetId]);
 
     res.json({ ok: true, message: 'Password reset by admin' });
   } catch (e) {
