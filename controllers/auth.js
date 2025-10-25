@@ -6,13 +6,13 @@ import { query, run } from '../db.js';
 const router = express.Router();
 const roleOf = (r) => String(r || '').toLowerCase();
 
-// Who am I
+// ---------- Who am I ----------
 router.get('/me', (req, res) => {
   if (req.session?.user) return res.json(req.session.user);
   return res.status(401).json({ error: 'Unauthorized' });
 });
 
-/** Login: users (admin/hr/accountant) and security supervisors */
+// ---------- Login ----------
 router.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body || {};
@@ -21,11 +21,23 @@ router.post('/login', async (req, res) => {
     }
     console.log('[auth] login attempt:', username);
 
-    // 1) users table (admin/hr/accountant)
+    // 1) App users (admin/hr/accountant)
     const users = await query('SELECT * FROM users WHERE username = $1', [username]);
     if (users.length) {
       const u = users[0];
-      const ok = await bcrypt.compare(password, u.password || '');
+
+      // Guard invalid/missing hashes (avoid 500)
+      if (!u.password || typeof u.password !== 'string' || !u.password.startsWith('$2')) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      let ok = false;
+      try {
+        ok = await bcrypt.compare(password, u.password);
+      } catch (e) {
+        console.error('[auth] bcrypt compare error (users):', e);
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
       if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
       const role = roleOf(u.role);
@@ -40,11 +52,22 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // 2) security_supervisors
+    // 2) Security supervisors
     const sups = await query('SELECT * FROM security_supervisors WHERE username = $1', [username]);
     if (sups.length) {
       const s = sups[0];
-      const ok = await bcrypt.compare(password, s.password || '');
+
+      if (!s.password || typeof s.password !== 'string' || !s.password.startsWith('$2')) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      let ok = false;
+      try {
+        ok = await bcrypt.compare(password, s.password);
+      } catch (e) {
+        console.error('[auth] bcrypt compare error (sup):', e);
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
       if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
       const role = 'security_supervisor';
@@ -66,7 +89,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-/** Logout */
+// ---------- Logout ----------
 router.post('/logout', (req, res) => {
   if (!req.session) return res.json({ ok: true });
   req.session.destroy((err) => {
@@ -78,12 +101,13 @@ router.post('/logout', (req, res) => {
   });
 });
 
-// GET /current-user
+// ---------- Current user ----------
 router.get('/current-user', (req, res) => {
   if (req.session?.user) return res.json(req.session.user);
   return res.status(401).json({ error: 'Unauthorized' });
 });
 
+// ---------- Guards ----------
 function requireAuth(req, res, next) {
   if (!req.session?.user) return res.status(401).json({ error: 'Unauthorized' });
   req.session.user.role = roleOf(req.session.user.role);
@@ -96,11 +120,11 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-/** Admin: list users/supervisors (no passwords) */
+// ---------- Admin: list users/supervisors ----------
 router.get('/admin/users', requireAdmin, async (_req, res) => {
   try {
-    const users = await query(`SELECT id, username, role FROM users ORDER BY role, username`);
-    const supervisors = await query(`SELECT id, username, name, client_id, site_name FROM security_supervisors ORDER BY username`);
+    const users = await query('SELECT id, username, role FROM users ORDER BY role, username');
+    const supervisors = await query('SELECT id, username, name, client_id, site_name FROM security_supervisors ORDER BY username');
     res.set('Cache-Control', 'no-store');
     res.json({ users, supervisors });
   } catch (err) {
@@ -109,7 +133,7 @@ router.get('/admin/users', requireAdmin, async (_req, res) => {
   }
 });
 
-/** Self change password (admin/accountant/hr only) */
+// ---------- Self change password (admin/accountant/hr only) ----------
 router.post('/change-password', requireAuth, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body || {};
@@ -127,7 +151,17 @@ router.post('/change-password', requireAuth, async (req, res) => {
     const me = await query('SELECT id, password FROM users WHERE id = $1', [req.session.user.id]);
     if (!me.length) return res.status(404).json({ error: 'User not found' });
 
-    const ok = await bcrypt.compare(currentPassword, me[0].password || '');
+    if (!me[0].password || typeof me[0].password !== 'string' || !me[0].password.startsWith('$2')) {
+      return res.status(400).json({ error: 'Current password is incorrect' });
+    }
+
+    let ok = false;
+    try {
+      ok = await bcrypt.compare(currentPassword, me[0].password);
+    } catch (e) {
+      console.error('[auth] bcrypt compare error (change-password):', e);
+      return res.status(400).json({ error: 'Current password is incorrect' });
+    }
     if (!ok) return res.status(400).json({ error: 'Current password is incorrect' });
 
     const newHash = await bcrypt.hash(newPassword, 10);
@@ -140,7 +174,7 @@ router.post('/change-password', requireAuth, async (req, res) => {
   }
 });
 
-/** Admin: reset password for a user in "users" */
+// ---------- Admin: reset password for a user ----------
 router.post('/admin/users/:id/reset-password', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -161,7 +195,7 @@ router.post('/admin/users/:id/reset-password', requireAdmin, async (req, res) =>
   }
 });
 
-/** Admin: reset password for a security supervisor */
+// ---------- Admin: reset password for a security supervisor ----------
 router.post('/admin/supervisors/:id/reset-password', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -182,7 +216,7 @@ router.post('/admin/supervisors/:id/reset-password', requireAdmin, async (req, r
   }
 });
 
-/** Generic admin reset by userId or username */
+// ---------- Admin: generic reset by userId or username ----------
 router.post('/admin/reset-password', requireAdmin, async (req, res) => {
   try {
     const { userId, username, newPassword } = req.body || {};
