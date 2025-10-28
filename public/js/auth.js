@@ -13,11 +13,12 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 
 export const login = async (username, password) => {
   const response = await fetch('/api/auth/login', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password })
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password })
   });
   if (response.ok) {
-    const user = await response.json();
-    req.session.user = { id: user.id, role: user.role };
+    // server sets the session cookie; just navigate
     window.location.href = '/index.html';
   } else {
     alert('Login failed');
