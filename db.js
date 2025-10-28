@@ -157,7 +157,44 @@ export async function initDB() {
 
   // --- Seed admin if missing ---
   const adminUsername = process.env.ADMIN_USERNAME || 'admin';
-  const existing = await db.get('SELECT id FROM users WHERE username = ?', adminUsername);
+  const existing = await db.get('SELECT id FROM users WHERE us0ername = ?', adminUsername);
+  if (!existing) {
+    const plain = process.env.ADMIN_PASSWORD || 'Admin@123';
+    const hash = await bcrypt.hash(plain, 10);
+    await db.run(
+      'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
+      adminUsername, hash, 'admin'
+    );
+    console.log(`[seed] Admin created → ${adminUsername}`);
+  }
+
+   // --- Seed accountant if missing ---
+const accountantUsername = process.env.ACCOUNTANT_USERNAME || 'accountant';
+const existingAcc = await db.get('SELECT id FROM users WHERE username = ?', accountantUsername);
+if (!existingAcc) {
+  const plain = process.env.ACCOUNTANT_PASSWORD || 'Account@123';
+  const hash = await bcrypt.hash(plain, 10);
+  await db.run(
+    'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
+    accountantUsername, hash, 'accountant'
+  );
+  console.log(`[seed] Accountant created → ${accountantUsername}`);
+}
+
+// --- Seed HR if missing ---
+const hrUsername = process.env.HR_USERNAME || 'hr';
+const existingHr = await db.get('SELECT id FROM users WHERE username = ?', hrUsername);
+if (!existingHr) {
+  const plain = process.env.HR_PASSWORD || 'Hr@123';
+  const hash = await bcrypt.hash(plain, 10);
+  await db.run(
+    'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
+    hrUsername, hash, 'hr'
+  );
+  console.log(`[seed] HR created → ${hrUsername}`);
+}
+
+  
   if (!existing) {
     const plain = process.env.ADMIN_PASSWORD || 'Admin@123';
     const hash = await bcrypt.hash(plain, 10);
