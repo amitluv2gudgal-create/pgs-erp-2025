@@ -204,7 +204,7 @@ router.post('/', async (req, res) => {
 
     // Send combined PDF as base64
     const pdfBase64 = Buffer.from(combined).toString('base64');
-    res.json({ pdf: pdfBase64 });
+    res.json({ id: insertId, pdf: pdfBase64 });
 
   } catch (err) {
     console.error('Error generating invoice+chart:', err);
@@ -298,7 +298,6 @@ router.get('/:id/pdf', async (req, res) => {
     // 3) Start PDF
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `${download ? 'attachment' : 'inline'}; filename=invoice_${id}.pdf`);
-    //const doc = new PDFDocument({ size: 'A4', margin: 48 });
     const doc = new PDFKit({ size: 'A4', margin: 48 });
 
     doc.pipe(res);

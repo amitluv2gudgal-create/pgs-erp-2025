@@ -89,8 +89,7 @@ export function showInvoiceForm() {
       credentials: 'include',
       body: JSON.stringify(formData)
      });
-
-       
+     
       if (response.ok) {
         const data = await response.json();
         alert('Invoice generated successfully!');
@@ -99,6 +98,12 @@ export function showInvoiceForm() {
       if (data && data.id) {
       window.open(`/api/invoices/${data.id}/pdf?download=1`, '_blank');
       }
+
+       if (data && data.id) {
+  window.open(`/api/invoices/${data.id}/pdf?download=1`, '_blank');
+}
+
+        
         if (data.pdf) {
           const pdfData = data.pdf;
           const byteCharacters = atob(pdfData);
