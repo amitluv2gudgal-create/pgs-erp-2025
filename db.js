@@ -157,7 +157,7 @@ export async function initDB() {
 
   // --- Seed admin if missing ---
   const adminUsername = process.env.ADMIN_USERNAME || 'admin';
-  const existing = await db.get('SELECT id FROM users WHERE us0ername = ?', adminUsername);
+  const existing = await db.get('SELECT id FROM users WHERE username = ?', adminUsername);
   if (!existing) {
     const plain = process.env.ADMIN_PASSWORD || 'Admin@123';
     const hash = await bcrypt.hash(plain, 10);
