@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PGS ERP</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <h1>PGS ERP Dashboard</h1>
+  <button id="logoutBtn">Logout</button>
+  <div id="content"></div>
+  <div id="adminSection" style="display: none;">
+    <h3>Pending Requests</h3>
+    <ul id="requestsList"></ul>
+    <button onclick="approveSelected()">Approve Selected</button>
+  </div>
+  <div id="accountantSection" style="display:none">
+    <h2>Accountant Actions</h2>
+    <h3>Generate Invoice</h3>
+    <select id="clientId">
+      <option value="">Select Client</option>
+    </select>
+    <input id="invoiceMonth" type="month" value="2025-09">
+    <button onclick="generateInvoice()">Generate Invoice</button>
+    <h3>Generate Salaries</h3>
+    <input id="salaryMonth" type="month" value="2025-09">
+    <button onclick="generateSalaries()">Generate Salaries</button>
+    <h3>Invoices</h3>
+    <ul id="invoicesList"></ul>
+    <h3>Salaries</h3>
+    <ul id="salariesList"></ul>
+  </div>
+ 
+  <div id="adminSection" style="display: none;">
+  <h3>Create Security Supervisor</h3>
+  <form id="supervisorForm">
+    <label>Username:<input type="text" id="supervisorUsername" required></label><br>
+    <label>Site Name:<input type="text" id="supervisorSite" required></label><br>
+    <button type="submit">Create</button>
+  </form>
+  <ul id="supervisorsList"></ul>
+  </div>
+ 
+  <div id="hrSection" style="display:none">
+    <h2>HR Actions</h2>
+    <h3>Clients</h3>
+    <ul id="clientsList"></ul>
+    <h3>Employees</h3>
+    <ul id="employeesList"></ul>
+    <h3>Attendances</h3>
+    <ul id="attendancesList"></ul>
+    <h3>Deductions</h3>
+    <ul id="deductionsList"></ul>
+  </div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
