@@ -99,6 +99,34 @@ export function showInvoiceForm() {
       window.open(`/api/invoices/${data.id}/pdf?download=1`, '_blank');
       }
 
+      if (data && data.id) {
+  // Try streaming endpoint first (server will send Content-Disposition)
+  const a = document.createElement('a');
+  a.href = `/api/invoices/${data.id}/pdf?download=1`;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+// Also fall back to inline base64 if present (ensures download even if streaming route has an issue)
+if (data && data.pdf) {
+  const byteChars = atob(data.pdf);
+  const byteNums = new Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i);
+  const blob = new Blob([new Uint8Array(byteNums)], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `invoice_${data.id || Date.now()}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+
        if (data && data.id) {
   window.open(`/api/invoices/${data.id}/pdf?download=1`, '_blank');
 }

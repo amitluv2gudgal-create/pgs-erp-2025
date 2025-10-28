@@ -2,8 +2,8 @@
 import express from 'express';
 import { query, run } from '../db.js';
 import { generateInvoicePDF, generateAttendanceChartPDF } from '../utils/pdf.js';
-import PDFKit from 'pdfkit';                  // for the GET /:id/pdf streaming doc
-import { PDFDocument as PDFLib } from 'pdf-lib';  // for in-memory merge on POST
+import PDFKit from 'pdfkit';                         // streaming PDF (GET /:id/pdf)
+import { PDFDocument as PDFLib } from 'pdf-lib';     // merging (POST /)
 
 
 const router = express.Router();
@@ -192,19 +192,21 @@ router.post('/', async (req, res) => {
     // 4) Append chart pages to invoice
     // 4) Append chart pages to invoice (using pdf-lib)
     const mainDoc = await PDFLib.load(
-    invoicePDF instanceof Uint8Array ? invoicePDF : new Uint8Array(invoicePDF)
-    );
-    const chartDoc = await PDFLib.load(
-    chartPDF instanceof Uint8Array ? chartPDF : new Uint8Array(chartPDF)
-    );
+  invoicePDF instanceof Uint8Array ? invoicePDF : new Uint8Array(invoicePDF)
+);
+
+   const chartDoc = await PDFLib.load(
+  chartPDF instanceof Uint8Array ? chartPDF : new Uint8Array(chartPDF)
+);
+
     const chartPages = await mainDoc.copyPages(chartDoc, chartDoc.getPageIndices());
-    chartPages.forEach(p => mainDoc.addPage(p));
-    const combined = await mainDoc.save();
+chartPages.forEach((p) => mainDoc.addPage(p));
+const combined = await mainDoc.save();
 
 
-    // Send combined PDF as base64
-    const pdfBase64 = Buffer.from(combined).toString('base64');
-    res.json({ id: insertId, pdf: pdfBase64 });
+   // 5) Send both id and pdf (base64) so the client has two ways to download
+const pdfBase64 = Buffer.from(combined).toString('base64');
+return res.json({ id: insertId, pdf: pdfBase64 });
 
   } catch (err) {
     console.error('Error generating invoice+chart:', err);
@@ -296,11 +298,10 @@ router.get('/:id/pdf', async (req, res) => {
     );
 
     // 3) Start PDF
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `${download ? 'attachment' : 'inline'}; filename=invoice_${id}.pdf`);
-    const doc = new PDFKit({ size: 'A4', margin: 48 });
-
-    doc.pipe(res);
+   res.setHeader('Content-Type', 'application/pdf');
+res.setHeader('Content-Disposition', `attachment; filename=invoice_${id}.pdf`);
+const doc = new PDFKit({ size: 'A4', margin: 48 });   // ← PDFKit alias
+doc.pipe(res);
 
     // ---------- Page 1: Invoice proper ----------
     // Header / Title
