@@ -82,12 +82,15 @@ export function showInvoiceForm() {
     const formData = { client_id, month, invoice_no };
 
     try {
+      
       const response = await fetch('/api/invoices', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
-      });
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(formData)
+     });
 
+       
       if (response.ok) {
         const data = await response.json();
         alert('Invoice generated successfully!');
@@ -128,7 +131,7 @@ export function showInvoiceForm() {
 // Load all invoices for viewing
 export const loadInvoices = async () => {
   try {
-    const res = await fetch('/api/invoices');
+    const res = await fetch('/api/invoices', { credentials: 'include' });
     if (!res.ok) {
       throw new Error(`HTTP error! status: ${res.status}`);
     }

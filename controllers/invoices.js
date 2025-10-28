@@ -2,7 +2,9 @@
 import express from 'express';
 import { query, run } from '../db.js';
 import { generateInvoicePDF, generateAttendanceChartPDF } from '../utils/pdf.js';
-import PDFDocument from 'pdfkit';
+import PDFKit from 'pdfkit';                  // for the GET /:id/pdf streaming doc
+import { PDFDocument as PDFLib } from 'pdf-lib';  // for in-memory merge on POST
+
 
 const router = express.Router();
 
@@ -188,11 +190,17 @@ router.post('/', async (req, res) => {
     });
 
     // 4) Append chart pages to invoice
-    const mainDoc = await PDFDocument.load(invoicePDF);
-    const chartDoc = await PDFDocument.load(chartPDF);
+    // 4) Append chart pages to invoice (using pdf-lib)
+    const mainDoc = await PDFLib.load(
+    invoicePDF instanceof Uint8Array ? invoicePDF : new Uint8Array(invoicePDF)
+    );
+    const chartDoc = await PDFLib.load(
+    chartPDF instanceof Uint8Array ? chartPDF : new Uint8Array(chartPDF)
+    );
     const chartPages = await mainDoc.copyPages(chartDoc, chartDoc.getPageIndices());
     chartPages.forEach(p => mainDoc.addPage(p));
     const combined = await mainDoc.save();
+
 
     // Send combined PDF as base64
     const pdfBase64 = Buffer.from(combined).toString('base64');
@@ -290,7 +298,9 @@ router.get('/:id/pdf', async (req, res) => {
     // 3) Start PDF
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `${download ? 'attachment' : 'inline'}; filename=invoice_${id}.pdf`);
-    const doc = new PDFDocument({ size: 'A4', margin: 48 });
+    //const doc = new PDFDocument({ size: 'A4', margin: 48 });
+    const doc = new PDFKit({ size: 'A4', margin: 48 });
+
     doc.pipe(res);
 
     // ---------- Page 1: Invoice proper ----------
