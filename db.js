@@ -157,14 +157,14 @@
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
-import { fileURLToPath } from 'url';
+// import { fileURLToPath } from 'url';
 
 // Fix __dirname for ES modules
-const __filename = fileURLToPath(import.meta.url);
-const _dirname = path.dirname(_filename);
+//const __filename = fileURLToPath(import.meta.url);
+//const _dirname = path.dirname(_filename);
 
 // Use Render’s persistent path if available, otherwise local path
-const dbPath = process.env.DB_PATH || path.join(__dirname, 'database.db');
+const dbPath = process.env.DB_PATH //|| path.join(__dirname, 'database.db');
 
 export async function initDB() {
   const db = await open({
