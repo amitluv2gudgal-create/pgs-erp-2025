@@ -15,7 +15,7 @@ import deductionRoutes from './controllers/deductions.js';
 import invoiceRoutes from './controllers/invoices.js';
 import salaryRoutes from './controllers/salaries.js';
 import requestRoutes from './controllers/requests.js';
-import securitySupervisorRoutes from './controllers/security_supervisor.js';
+import securitySupervisorRoutes from './controllers/security_supervisors.js';
 
 dotenv.config();
 
