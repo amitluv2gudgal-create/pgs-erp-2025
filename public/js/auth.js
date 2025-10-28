@@ -12,10 +12,13 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 });
 
 export const login = async (username, password) => {
+  // const response = await fetch('/api/auth/login', {
   const response = await fetch('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password })
+    // body: JSON.stringify({ username, password })
+    body: JSON.stringify({ username, password }),
+    credentials: 'include'     // <— send/receive cookies
   });
   if (response.ok) {
     // server sets the session cookie; just navigate

@@ -7,10 +7,14 @@ import { loadInvoices } from './invoices.js';
 import { loadSalaries } from './salaries.js';
 import { loadRequests } from './requests.js';
 
+const fetchAuth = (url, opts = {}) => fetch(url, { credentials: 'include', ...opts });
+
+
 let user; // Declare user globally
 
 document.addEventListener('DOMContentLoaded', async () => {
-  const res = await fetch('/api/auth/current-user');
+  // const res = await fetch('/api/auth/current-user');
+  const res = await fetch('/api/auth/current-user', { credentials: 'include' });
   if (!res.ok) {
     window.location.href = '/login.html';
     return; // Exit if not authenticated
@@ -86,7 +90,8 @@ if (['admin', 'accountant', 'hr'].includes(user.role)) {
 
   document.getElementById('logoutBtn').addEventListener('click', async () => {
     try {
-      await fetch('/api/auth/logout');
+      // await fetch('/api/auth/logout');
+      await fetch('/api/auth/logout', { credentials: 'include' });
     } catch (err) {
       console.error('Logout error:', err);
     }
@@ -112,7 +117,8 @@ window.showTable = async (table) => {
   else if (table === 'invoices') data = await loadInvoices();
   else if (table === 'salaries') data = await loadSalaries();
   else if (table === 'security_supervisors') {
-    const res = await fetch('/api/security-supervisors');
+    // const res = await fetch('/api/security-supervisors');
+    const res = await fetch('/api/security-supervisors', { credentials: 'include' });
     data = res.ok ? await res.json() : [];
     if (!res.ok) console.error('Fetch error for supervisors:', await res.text());
   }

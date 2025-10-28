@@ -34,11 +34,22 @@ router.post('/login', async (req, res) => {
       const user = users[0];
       const match = await bcrypt.compare(password, user.password);
       // console.log('Password match for user:', match);
+      // if (match) {
+      //   req.session.user = { id: user.id, role: user.role, username: user.username };
+      //   return res.json({ success: true, role: user.role });
+      // }
       if (match) {
-        req.session.user = { id: user.id, role: user.role, username: user.username };
-        // console.log('Session set:', req.session.user);
-        return res.json({ success: true, role: user.role });
-      }
+  req.session.regenerate((err) => {
+    if (err) return res.status(500).json({ error: 'Session error' });
+    req.session.user = { id: user.id, role: user.role, username: user.username };
+    req.session.save((err2) => {
+      if (err2) return res.status(500).json({ error: 'Session save error' });
+      return res.json({ success: true, role: user.role });
+    });
+  });
+  return; // prevent fallthrough
+}
+
     }
 
     // If not found in users, check security_supervisors
@@ -48,11 +59,23 @@ router.post('/login', async (req, res) => {
       const supervisor = supervisors[0];
       const match = await bcrypt.compare(password, supervisor.password);
       // console.log('Password match for supervisor:', match);
+      // if (match) {
+      //   req.session.user = { id: supervisor.id, role: 'security_supervisor', username: supervisor.username };
+      //   // console.log('Session set:', req.session.user);
+      //   return res.json({ success: true, role: 'security_supervisor' });
+      // }
       if (match) {
-        req.session.user = { id: supervisor.id, role: 'security_supervisor', username: supervisor.username };
-        // console.log('Session set:', req.session.user);
-        return res.json({ success: true, role: 'security_supervisor' });
-      }
+  req.session.regenerate((err) => {
+    if (err) return res.status(500).json({ error: 'Session error' });
+    req.session.user = { id: supervisor.id, role: 'security_supervisor', username: supervisor.username };
+    req.session.save((err2) => {
+      if (err2) return res.status(500).json({ error: 'Session save error' });
+      return res.json({ success: true, role: 'security_supervisor' });
+    });
+  });
+  return; // prevent fallthrough
+}
+
     }
 
     console.log('No valid user or supervisor found for username:', username);

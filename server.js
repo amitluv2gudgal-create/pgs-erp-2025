@@ -20,6 +20,10 @@ import securitySupervisorRoutes from './controllers/security_supervisors.js';
 dotenv.config();
 
 const app = express();
+
+// Behind Render's proxy, this is REQUIRED for secure cookies to be set
+app.set('trust proxy', 1);
+
 const { SESSION_SECRET, NODE_ENV } = process.env;
 const PORT = process.env.PORT || 3000;
 
@@ -36,8 +40,14 @@ app.use(session({
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: NODE_ENV === 'production' }
+  cookie: {
+   httpOnly: true,                 // not readable by JS
+   sameSite: 'lax',                // works across normal GET navigations
+   secure: process.env.NODE_ENV === 'production', // set on HTTPS
+   maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+ }
 }));
+
 
 // Only protect /api; allow /api/auth/login and /api/auth/current-user
 const requireAuth = (req, res, next) => {
