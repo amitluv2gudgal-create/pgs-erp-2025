@@ -7,9 +7,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // const DB_PATH = './database.db';
-// const DB_PATH = process.env.DB_PATH;
 const DB_PATH = process.env.DB_PATH || './database.db';
-
 
 
 export async function initDB() {
