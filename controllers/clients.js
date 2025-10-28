@@ -70,7 +70,7 @@ export async function loadClients() {
   }
 }
 
-console.log('Clients query result:', await query('SELECT * FROM clients'));
+// console.log('Clients query result:', await query('SELECT * FROM clients'));
 
 // Edit client (request approval if not admin)
 router.put('/:id', async (req, res) => {

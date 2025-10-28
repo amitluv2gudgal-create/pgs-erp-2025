@@ -23,32 +23,34 @@ function requireRole(...roles) {
 // ================== LOGIN (users + security supervisors) ==================
 router.post('/login', async (req, res) => {
   const { username, password } = req.body;
-  console.log('Login attempt:', { username, password }); // Debug log
+  // console.log('Login attempt:', { username, password }); // Debug log
+  console.log('Login attempt:', { username });
   try {
     // Check users table first
     const users = await query('SELECT * FROM users WHERE username = ?', [username]);
-    console.log('Users found:', users);
+    // console.log('Users found:', users);
+    // console.log('Users found:', users.length);
     if (users.length > 0) {
       const user = users[0];
       const match = await bcrypt.compare(password, user.password);
-      console.log('Password match for user:', match);
+      // console.log('Password match for user:', match);
       if (match) {
         req.session.user = { id: user.id, role: user.role, username: user.username };
-        console.log('Session set:', req.session.user);
+        // console.log('Session set:', req.session.user);
         return res.json({ success: true, role: user.role });
       }
     }
 
     // If not found in users, check security_supervisors
     const supervisors = await query('SELECT * FROM security_supervisors WHERE username = ?', [username]);
-    console.log('Supervisors found:', supervisors);
+    // console.log('Supervisors found:', supervisors);
     if (supervisors.length > 0) {
       const supervisor = supervisors[0];
       const match = await bcrypt.compare(password, supervisor.password);
-      console.log('Password match for supervisor:', match);
+      // console.log('Password match for supervisor:', match);
       if (match) {
         req.session.user = { id: supervisor.id, role: 'security_supervisor', username: supervisor.username };
-        console.log('Session set:', req.session.user);
+        // console.log('Session set:', req.session.user);
         return res.json({ success: true, role: 'security_supervisor' });
       }
     }
