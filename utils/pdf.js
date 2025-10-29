@@ -6,6 +6,7 @@ import PDFDocument from 'pdfkit';
  * Renders line items from `categoryData` where qty > 0; totals use the passed
  * values so they stay consistent with your controller-side calculations.
  */
+// --- REPLACE ONLY THIS FUNCTION IN utils/pdf.js ---
 export const generateInvoicePDF = (
   client,
   month,
@@ -27,7 +28,7 @@ export const generateInvoicePDF = (
     doc.on('end', () => resolve(Buffer.concat(buffers)));
     doc.on('error', reject);
 
-    // Company header
+    // ========= Header (unchanged visual) =========
     doc.fontSize(12).text('PGS INDIA PRIVATE LIMITED', 50, 50, { align: 'center' });
     doc.fontSize(10).text('2ND FLOOR, OFFICE NO. 207, PLOT NO. 56,', 50, 65, { align: 'center' });
     doc.text('MONARCH PLAZA, SECTOR-11, CBD BELAPUR,', 50, 80, { align: 'center' });
@@ -41,7 +42,6 @@ export const generateInvoicePDF = (
     doc.text('Duplicate for Transporter', 400, 175);
     doc.text('Triplicate for Supplier', 400, 190);
 
-    // Invoice meta
     doc.text('Reverse Charge : No', 50, 205);
     doc.text(`Invoice No. : ${invoiceNo}`, 50, 220);
     doc.text(`Invoice Date : ${invoiceDate}`, 50, 235);
@@ -53,7 +53,6 @@ export const generateInvoicePDF = (
     doc.text('Vehicle No. : ', 300, 220);
     doc.text('Place of Supply : ', 300, 235);
 
-    // Bill To / Ship To
     doc.text('Details of Receiver | Billed to:', 50, 300);
     doc.text('Name : ' + (client?.name || ''), 50, 315);
     doc.text('Address : ' + (client?.address || ''), 50, 330);
@@ -66,25 +65,43 @@ export const generateInvoicePDF = (
     doc.text('State : Maharashtra', 300, 345);
     doc.text('State Code : 27', 300, 360);
 
-    // Table header (monospace for alignment)
+    // ========= Table (fits within page width) =========
     doc.font('Courier');
-    const colX = [50, 75, 175, 210, 230, 260, 295, 355, 385, 445, 475, 535];
-    const colW = [25, 100, 35, 20, 30, 35, 60, 30, 60, 30, 60, 70];
 
-    doc.fontSize(6);
+    // Printable width on A4 with 36pt margins ≈ 523pt
+    const left = 36;
+    const contentWidth = doc.page.width - 2 * 36; // ~523
+
+    // New column widths sum to 505pt (fits inside 523pt comfortably)
+    const colW = [
+      25,  // Sr. No.
+      90,  // Name of product
+      30,  // HSN/SAC
+      24,  // QTY
+      25,  // Unit
+      30,  // Rate
+      55,  // Taxable Value
+      28,  // CGST Rate
+      55,  // CGST Amount
+      28,  // SGST Rate
+      55,  // SGST Amt.
+      50   // Total
+    ];
+    const sumW = colW.reduce((a, b) => a + b, 0); // 505
+    const startX = left + Math.floor((contentWidth - sumW) / 2); // center the table
+    const colX = [];
+    colW.reduce((x, w, i) => (colX[i] = x, x + w), startX);
+
+    // Header row
     const tY = 380;
-    doc.text('Sr. No.', colX[0], tY, { width: colW[0], align: 'center' });
-    doc.text('Name of product', colX[1], tY, { width: colW[1], align: 'left' });
-    doc.text('HSN/SAC', colX[2], tY, { width: colW[2], align: 'left' });
-    doc.text('QTY', colX[3], tY, { width: colW[3], align: 'right' });
-    doc.text('Unit', colX[4], tY, { width: colW[4], align: 'left' });
-    doc.text('Rate', colX[5], tY, { width: colW[5], align: 'right' });
-    doc.text('Taxable Value', colX[6], tY, { width: colW[6], align: 'right' });
-    doc.text('CGST Rate', colX[7], tY, { width: colW[7], align: 'right' });
-    doc.text('CGST Amount', colX[8], tY, { width: colW[8], align: 'right' });
-    doc.text('SGST Rate', colX[9], tY, { width: colW[9], align: 'right' });
-    doc.text('SGST Amt.', colX[10], tY, { width: colW[10], align: 'right' });
-    doc.text('Total', colX[11], tY, { width: colW[11], align: 'right' });
+    doc.fontSize(6);
+    const headerLabels = [
+      'Sr. No.', 'Name of product', 'HSN/SAC', 'QTY', 'Unit', 'Rate',
+      'Taxable Value', 'CGST Rate', 'CGST Amount', 'SGST Rate', 'SGST Amt.', 'Total'
+    ];
+    headerLabels.forEach((label, i) => {
+      doc.text(label, colX[i], tY, { width: colW[i], align: i === 1 ? 'left' : 'center' });
+    });
 
     // Line items
     doc.fontSize(8);
@@ -105,7 +122,7 @@ export const generateInvoicePDF = (
 
         doc.text(String(sr), colX[0], y, { width: colW[0], align: 'center' });
         doc.text(cat, colX[1], y, { width: colW[1], align: 'left' });
-        doc.text('998525', colX[2], y, { width: colW[2], align: 'left' });
+        doc.text('998525', colX[2], y, { width: colW[2], align: 'center' });
         doc.text(qty.toFixed(0), colX[3], y, { width: colW[3], align: 'right' });
         doc.text('DAYS', colX[4], y, { width: colW[4], align: 'left' });
         doc.text(rate.toFixed(2), colX[5], y, { width: colW[5], align: 'right' });
@@ -126,7 +143,7 @@ export const generateInvoicePDF = (
       }
     });
 
-    // Totals (row)
+    // Totals row
     doc.text('Total Quantity', colX[0], y, { width: colW[0] + colW[1], align: 'left' });
     doc.text(totalQty.toFixed(0), colX[3], y, { width: colW[3], align: 'right' });
     doc.text('Rs. ' + taxableValue.toFixed(2), colX[6], y, { width: colW[6], align: 'right' });
@@ -134,10 +151,8 @@ export const generateInvoicePDF = (
     doc.text('Rs. ' + sgstTotal.toFixed(2), colX[10], y, { width: colW[10], align: 'right' });
     doc.text('Rs. ' + grandTotalCalc.toFixed(2), colX[11], y, { width: colW[11], align: 'right' });
 
-    // Back to Helvetica for footer sections
+    // ========= Footer panels (unchanged) =========
     doc.font('Helvetica');
-
-    // Bank details
     y += 30;
     doc.text('Bank Details', 50, y + 15);
     y += 10;
@@ -151,7 +166,6 @@ export const generateInvoicePDF = (
     y += 10;
     doc.text('Bank Branch Name : KHARGHAR NAVI MUMBAI', 50, y + 15);
 
-    // Totals panel — use the values passed from controller to stay consistent
     y += 30;
     doc.text('Total Amount Before Tax : Rs. ' + Number(total).toFixed(2), 300, y + 15);
     y += 10;
@@ -165,7 +179,6 @@ export const generateInvoicePDF = (
     y += 10;
     doc.text('Balance Due : Rs. ' + Number(grand_total).toFixed(2), 300, y + 15);
 
-    // Certification & signature
     y += 30;
     doc.text('Certified that the particular given above are true and correct', 50, y + 15);
     doc.text('For, PGS INDIA PRIVATE LIMITED', 300, y + 15);
@@ -174,7 +187,6 @@ export const generateInvoicePDF = (
     y += 10;
     doc.text('Name : Accountant', 300, y + 15);
 
-    // Terms
     y += 30;
     doc.text('Terms And Conditions', 50, y + 15);
     y += 10;
@@ -183,6 +195,7 @@ export const generateInvoicePDF = (
     doc.end();
   });
 };
+
 
 /**
  * SALARY PDF — unchanged logic (minor safety casts).
