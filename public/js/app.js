@@ -7,19 +7,18 @@ import { loadInvoices } from './invoices.js';
 import { loadSalaries } from './salaries.js';
 import { loadRequests } from './requests.js';
 
+// ✅ FIX: spread opts correctly + always include cookies
 const fetchAuth = (url, opts = {}) => fetch(url, { credentials: 'include', ...opts });
-
 
 let user; // Declare user globally
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // const res = await fetch('/api/auth/current-user');
   const res = await fetch('/api/auth/current-user', { credentials: 'include' });
   if (!res.ok) {
     window.location.href = '/login.html';
-    return; // Exit if not authenticated
+    return;
   }
-  user = await res.json(); // Assign the fetched user data
+  user = await res.json();
   if (!user || typeof user.role === 'undefined') {
     console.error('User data is invalid or missing role:', user);
     window.location.href = '/login.html';
@@ -28,9 +27,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const content = document.getElementById('content');
   content.innerHTML = `<h2>Welcome, ${user.role}</h2>`;
 
-  // Buttons rendered based on role
   if (user.role !== 'security_supervisor') {
-    // Common: View tables (NOT for supervisor)
     content.innerHTML += '<button onclick="showTable(\'clients\')">View Clients</button>';
     content.innerHTML += '<button onclick="showTable(\'employees\')">View Employees</button>';
     content.innerHTML += '<button onclick="showTable(\'attendances\')">View Attendances</button>';
@@ -54,43 +51,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     content.innerHTML += '<button onclick="showPendingRequests()">View Pending Requests</button>';
     content.innerHTML += '<button onclick="showSupervisorForm()">Create Security Supervisor</button>';
     content.innerHTML += '<button onclick="showTable(\'security_supervisors\')">View Security Supervisors</button>';
-    document.getElementById('adminSection').style.display = 'block';
+    const adminSection = document.getElementById('adminSection');
+    if (adminSection) adminSection.style.display = 'block';
   } else if (user.role === 'security_supervisor') {
-    // Supervisor: ONLY submit attendance
     content.innerHTML += '<button onclick="showAttendanceFormForSupervisor()">Submit Attendance</button>';
   }
 
-  // NEW: Change Password (self) for admin/accountant/hr
   if (['admin', 'accountant', 'hr'].includes(user.role)) {
     content.innerHTML += '<button onclick="showChangePassword()">Change Password</button>';
   }
 
-  // Show "Reset Any Password" for Admin
-if (user.role === 'admin') {
-  if (!document.getElementById('btnAdminResetAny')) {
-    const btn = document.createElement('button');
-    btn.id = 'btnAdminResetAny';
-    btn.textContent = 'Reset Any Password (Admin)';
-    btn.onclick = showAdminResetAnyPassword; // function defined below
-    document.getElementById('content').appendChild(btn);
+  if (user.role === 'admin') {
+    if (!document.getElementById('btnAdminResetAny')) {
+      const btn = document.createElement('button');
+      btn.id = 'btnAdminResetAny';
+      btn.textContent = 'Reset Any Password (Admin)';
+      btn.onclick = showAdminResetAnyPassword;
+      content.appendChild(btn);
+    }
   }
-}
-
-// Show "Search Profile" for admin/accountant/hr
-if (['admin', 'accountant', 'hr'].includes(user.role)) {
-  if (!document.getElementById('btnUnifiedSearch')) {
-    const btn = document.createElement('button');
-    btn.id = 'btnUnifiedSearch';
-    btn.textContent = 'Search Profile';
-    btn.onclick = showUnifiedSearch;
-    document.getElementById('content').appendChild(btn);
-  }
-}
-
 
   document.getElementById('logoutBtn').addEventListener('click', async () => {
     try {
-      // await fetch('/api/auth/logout');
       await fetch('/api/auth/logout', { credentials: 'include' });
     } catch (err) {
       console.error('Logout error:', err);
@@ -117,7 +99,6 @@ window.showTable = async (table) => {
   else if (table === 'invoices') data = await loadInvoices();
   else if (table === 'salaries') data = await loadSalaries();
   else if (table === 'security_supervisors') {
-    // const res = await fetch('/api/security-supervisors');
     const res = await fetch('/api/security-supervisors', { credentials: 'include' });
     data = res.ok ? await res.json() : [];
     if (!res.ok) console.error('Fetch error for supervisors:', await res.text());
@@ -126,7 +107,6 @@ window.showTable = async (table) => {
   data = Array.isArray(data) ? data : [];
   window['data_' + table] = data;
 
-  // 🔹 Hide all other table containers before showing the new one
   document.querySelectorAll('[id^="table-container-"]').forEach(div => {
     div.style.display = 'none';
   });
@@ -138,17 +118,14 @@ window.showTable = async (table) => {
     container.id = containerId;
     document.getElementById('content').appendChild(container);
   }
-  container.style.display = 'block'; // ensure visible
-  container.innerHTML = '';
-
-  const searchHtml = `
+  container.style.display = 'block';
+  container.innerHTML = `
     <h3>${table.charAt(0).toUpperCase() + table.slice(1)} Table</h3>
     <input type="text" id="search-${table}" placeholder="Search by name/ID, month, date (e.g., 'John' or '123' or '2025-09')" oninput="filterTable('${table}')">
     <label><input type="checkbox" id="exact-${table}" onchange="toggleExactMatch('${table}')"> Exact Match</label>
     <button onclick="clearSearch('${table}')">Clear</button>
     <div id="table-${table}"></div>
   `;
-  container.innerHTML = searchHtml;
 
   window[`exact_${table}`] = false;
   window.renderTable(containerId, table, data, '');

@@ -165,25 +165,31 @@ if (data && data.pdf) {
 export const loadInvoices = async () => {
   try {
     const res = await fetch('/api/invoices', { credentials: 'include' });
-    if (!res.ok) {
-      throw new Error(`HTTP error! status: ${res.status}`);
-    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     return Array.isArray(data) ? data : [];
-  } catch (error) {
-    console.error('Error loading invoices:', error);
+  } catch (e) {
+    console.error('Error loading invoices:', e);
     return [];
   }
 };
 
-// Generate Invoice modal (replaces existing showInvoiceForm)
+async function fetchClientsListSafe() {
+  try {
+    const r = await fetch('/api/clients', { credentials: 'include' });
+    if (!r.ok) throw new Error(await r.text());
+    return await r.json();
+  } catch (e) {
+    console.error('Failed to load clients', e);
+    return [];
+  }
+}
+
 window.showInvoiceForm = async () => {
   if (document.getElementById('invoice-modal')) return;
 
-  // 1) Load clients first
   const clients = await fetchClientsListSafe();
 
-  // 2) Build options
   const clientOptions = (clients.length
     ? ['<option value="">-- Select Client --</option>'].concat(
         clients.map(c => `<option value="${c.id}">${(c.name || 'Client')} (ID: ${c.id})</option>`)
@@ -191,38 +197,25 @@ window.showInvoiceForm = async () => {
     : ['<option value="">No clients available</option>']
   ).join('');
 
-  // 3) Render minimal modal
   const overlay = document.createElement('div');
   overlay.id = 'invoice-modal';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:9999';
 
   const card = document.createElement('div');
   card.style.cssText = 'background:#fff;min-width:380px;max-width:520px;padding:16px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2)';
-
   card.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
       <h3 style="margin:0;">Generate Invoice</h3>
       <button id="inv-close" style="border:none;background:transparent;font-size:20px;cursor:pointer" title="Close">&times;</button>
     </div>
-
     <form id="invoiceForm">
-      <label>Client<br>
-        <select id="inv_client_id" required>${clientOptions}</select>
-      </label><br><br>
-
-      <label>Month (YYYY-MM)<br>
-        <input type="text" id="inv_month" placeholder="2025-10" required>
-      </label><br><br>
-
-      <label>Invoice No.<br>
-        <input type="text" id="inv_invoice_no" placeholder="INV/..." required>
-      </label>
-
+      <label>Client<br><select id="inv_client_id" required>${clientOptions}</select></label><br><br>
+      <label>Invoice No (optional)<br><input type="text" id="inv_invoice_no"></label><br><br>
+      <label>Month (YYYY-MM)<br><input type="month" id="inv_month" required></label><br><br>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
         <button type="submit">Generate</button>
         <button type="button" id="inv-cancel">Cancel</button>
       </div>
-
       <div id="inv_msg" style="margin-top:6px;color:#b00;"></div>
     </form>
   `;
@@ -234,42 +227,57 @@ window.showInvoiceForm = async () => {
   $('inv-close').onclick = close;
   $('inv-cancel').onclick = close;
 
-  // 4) Basic validation helpers
-  function isYYYYMM(s) { return /^\d{4}-(0[1-9]|1[0-2])$/.test(s); }
+  const isYYYYMM = s => /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
 
-  // 5) Submit handler: send only required fields
   $('invoiceForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     $('inv_msg').textContent = '';
 
     const client_id = parseInt($('inv_client_id').value, 10);
-    const month = $('inv_month').value.trim();
     const invoice_no = $('inv_invoice_no').value.trim();
+    const monthInput = $('inv_month').value; // browser gives "YYYY-MM"
+    const month = monthInput;
 
-    if (!Number.isInteger(client_id) || client_id <= 0) {
-      $('inv_msg').textContent = 'Please select a client.';
-      return;
-    }
-    if (!isYYYYMM(month)) {
-      $('inv_msg').textContent = 'Month must be in YYYY-MM format.';
-      return;
-    }
-    if (!invoice_no) {
-      $('inv_msg').textContent = 'Invoice No. is required.';
-      return;
-    }
+    if (!Number.isInteger(client_id) || client_id <= 0) return $('inv_msg').textContent = 'Please select a client.';
+    if (!isYYYYMM(month)) return $('inv_msg').textContent = 'Month must be in YYYY-MM format.';
 
     try {
-      // Backend will compute totals/dates automatically
       const r = await fetch('/api/invoices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ client_id, month, invoice_no })
       });
       const data = await r.json().catch(()=> ({}));
       if (!r.ok) throw new Error(data.error || 'Failed to generate invoice');
 
       alert('Invoice generated successfully');
+
+      // ✅ Single reliable download path: stream from GET. (Browser will include cookies)
+      if (data && data.id) {
+        const a = document.createElement('a');
+        a.href = `/api/invoices/${data.id}/pdf?download=1`;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      } else if (data && data.pdf) {
+        // Fallback only if server didn’t return id for some reason
+        const byteChars = atob(data.pdf);
+        const byteNums = new Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i);
+        const blob = new Blob([new Uint8Array(byteNums)], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `invoice_${client_id}_${month}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+
       close();
       if (window.showTable) window.showTable('invoices');
     } catch (err) {
