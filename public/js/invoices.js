@@ -1,18 +1,3 @@
-// Local helper to avoid name clashes
-// Local, collision-free helper
-async function fetchClientsListSafe() {
-  try {
-    const r = await fetch('/api/clients');
-    if (!r.ok) throw new Error(await r.text());
-    const list = await r.json();
-    return Array.isArray(list) ? list : [];
-  } catch (e) {
-    console.error('fetchClientsListSafe error:', e);
-    return [];
-  }
-}
-
-
 // Show form for generating invoice
 export function showInvoiceForm() {
   if (document.getElementById('invoice-modal')) return;
