@@ -34,7 +34,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     content.innerHTML += '<button onclick="showTable(\'deductions\')">View Deductions</button>';
     content.innerHTML += '<button onclick="showTable(\'invoices\')">View Invoices</button>';
     content.innerHTML += '<button onclick="showTable(\'salaries\')">View Salaries</button>';
+    content.innerHTML += '<button onclick="showUnifiedSearch()">Search Profile</button>';
   }
+  window.showUnifiedSearch = showUnifiedSearch;
+
 
   if (user.role === 'accountant') {
     content.innerHTML += '<h3>Accountant Actions</h3>';
@@ -1267,15 +1270,14 @@ function showClientProfile(cli, invoicesAll) {
 
 async function safeGet(url) {
   try {
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(await r.text());
-    return await r.json();
-  } catch (e) {
-    console.error('GET failed:', url, e);
-    return [];
-  }
+    const r = await fetch(url, { credentials: 'include' });
+     if (!r.ok) throw new Error(await r.text());
+     return await r.json();
+   } catch (e) {
+     console.error('GET failed:', url, e);
+     return [];
+   }
 }
-
 function escapeHtml(s) {
   if (s == null) return '';
   return String(s)
