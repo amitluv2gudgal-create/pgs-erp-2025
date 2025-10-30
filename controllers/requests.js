@@ -1,8 +1,21 @@
 // controllers/requests.js
 import express from 'express';
-import { query, run } from '../db.js';
+import { run, query } from '../db.js';
 
 const router = express.Router();
+
+// ========== helper to log a new request ==========
+export async function createRequest(table, record_id, action, data, new_data = null) {
+  // Always stringify safely
+  const dataStr = data ? JSON.stringify(data) : null;
+  const newDataStr = new_data ? JSON.stringify(new_data) : null;
+  await run(
+    `INSERT INTO requests (table_name, record_id, action, data, new_data, status)
+     VALUES (?, ?, ?, ?, ?, 'pending')`,
+    [table, record_id, action, dataStr, newDataStr]
+  );
+}
+
 
 // Helpers ----------------------------------------------------
 
