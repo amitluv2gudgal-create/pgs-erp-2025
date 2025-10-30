@@ -181,6 +181,19 @@ async function seedUser(username, plain, role) {
   }
 }
 
+
+export async function ensureRequestsApproverColumn() {
+  const cols = await query(`PRAGMA table_info(requests)`);
+  const names = new Set(cols.map(c => c.name));
+
+  if (!names.has('approver_id')) {
+    await run(`ALTER TABLE requests ADD COLUMN approver_id INTEGER`);
+    // Optional: index to speed up admin view
+    try { await run(`CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status)`); } catch {}
+  }
+}
+
+
 // --- Safe migration for existing databases ---
 export async function ensureClientExtraFields() {
   const cols = await query(`PRAGMA table_info(clients)`);

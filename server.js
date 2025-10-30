@@ -3,11 +3,7 @@ import express from 'express';
 import session from 'express-session';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
-import { ensureClientExtraFields } from './db.js';
-import { dropLegacyClientAddressColumn } from './db.js';
-import { initDB, DB_PATH } from './db.js';
-
-
+import { dropLegacyClientAddressColumn, ensureRequestsApproverColumn, ensureClientExtraFields, initDB, DB_PATH } from './db.js';
 
 // Route modules (pure routers — must NOT touch DB at import time)
 import authRoutes from './controllers/auth.js';
@@ -66,7 +62,7 @@ async function bootstrap() {
 
   ensureClientExtraFields().catch(err => console.error('Client fields migration failed:', err));
   await dropLegacyClientAddressColumn();
-
+  await ensureRequestsApproverColumn(); 
   // 2) Register middleware AFTER DB is ready
   app.use('/api', requireAuth);
 
