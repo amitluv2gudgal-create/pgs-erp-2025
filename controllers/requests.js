@@ -1,94 +1,151 @@
-// PGS-ERP/controllers/requests.js
+// controllers/requests.js
 import express from 'express';
 import { query, run } from '../db.js';
 
 const router = express.Router();
 
-// Create request (internal function)
-export async function createRequest(requester_id, action, table_name, record_id, new_data) {
-  try {
-    await run(
-      'INSERT INTO requests (requester_id, action, table_name, record_id, data, new_data, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [requester_id, action, table_name, record_id, null, new_data || null, 'pending']
-    );
-  } catch (err) {
-    console.error('Error creating request:', err);
-    throw err;
-  }
+// Helpers ----------------------------------------------------
+
+/** Get list of column names for a table from SQLite */
+async function getTableColumns(table) {
+  const cols = await query(`PRAGMA table_info(${table})`);
+  return cols.map(c => c.name);
 }
 
-// POST route to create a new request (for edit/delete from frontend)
-router.post('/', async (req, res) => {
-  if (!['accountant', 'hr'].includes(req.session.user.role)) return res.status(403).json({ error: 'Forbidden' });
-  const { action, table_name, record_id, data } = req.body;
-  try {
-    if (!action || !table_name || !record_id) {
-      throw new Error('Missing required parameters: action, table_name, record_id');
+/** Parse JSON safely */
+function parseJSONSafe(s) {
+  if (s == null) return null;
+  try { return typeof s === 'string' ? JSON.parse(s) : s; } catch { return null; }
+}
+
+/** Prepare sanitized update payload: intersect keys with actual columns, apply legacy mappings */
+async function sanitizeUpdate(table, payloadRaw) {
+  const payload = { ...(payloadRaw || {}) };
+
+  // Legacy → new column mapping for clients
+  if (table === 'clients') {
+    if (payload.address && !payload.address_line1) {
+      payload.address_line1 = payload.address;
     }
-    await createRequest(req.session.user.id, action, table_name, record_id, data);
-    res.json({ message: 'Request created successfully. Awaiting admin approval.' });
-  } catch (err) {
-    console.error('Error creating request:', err);
-    res.status(500).json({ error: err.message });
+    delete payload.address; // ensure we never try to write legacy column
   }
-});
 
-// Get pending requests (admin only)
-router.get('/pending', async (req, res) => {
-  if (req.session.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  const cols = await getTableColumns(table);
+  const allowed = new Set(cols);
+
+  // Never allow id overwrite
+  delete payload.id;
+
+  // Keep only known columns
+  const clean = {};
+  for (const [k, v] of Object.entries(payload)) {
+    if (allowed.has(k)) clean[k] = v;
+  }
+  return clean;
+}
+
+/** Apply an UPDATE */
+async function applyUpdate(table, id, clean) {
+  const keys = Object.keys(clean);
+  if (!keys.length) {
+    // nothing to update; treat as success
+    return { changes: 0 };
+  }
+  const setClause = keys.map(k => `${k} = ?`).join(', ');
+  const values = keys.map(k => clean[k]);
+  return await run(`UPDATE ${table} SET ${setClause} WHERE id = ?`, [...values, id]);
+}
+
+/** Apply a DELETE */
+async function applyDelete(table, id) {
+  return await run(`DELETE FROM ${table} WHERE id = ?`, [id]);
+}
+
+/** Load one request row by id */
+async function getRequestById(id) {
+  const rows = await query(`SELECT * FROM requests WHERE id = ?`, [id]);
+  return rows[0] || null;
+}
+
+// Routes -----------------------------------------------------
+
+// List pending requests
+router.get('/', async (req, res) => {
   try {
-    const requests = await query('SELECT * FROM requests WHERE status = "pending"');
-    res.json(requests);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    if (!req.session?.user || req.session.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const rows = await query(`SELECT * FROM requests ORDER BY id DESC`);
+    res.json(rows);
+  } catch (e) {
+    console.error('GET /requests error:', e);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
-// Verify Attendance
-router.post('/verify-attendance/:id', async (req, res) => {
-  if (!req.session?.user || req.session.user.role !== 'hr') {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-  const { id } = req.params;
-  await run('UPDATE attendances SET status = ? WHERE id = ? AND status = ?', ['verified', id, 'pending']);
-  res.json({ message: 'Attendance verified' });
-});
-
-// Approve request (admin)
+// Approve a request (update/delete)
 router.post('/approve/:id', async (req, res) => {
-  const { id } = req.params;
   try {
-    const request = await query('SELECT * FROM requests WHERE id = ? AND status = ?', [id, 'pending']);
-    if (!request.length) return res.status(404).json({ error: 'Request not found or already processed' });
-
-    const { table_name, record_id, new_data } = request[0];
-    if (new_data) {
-      // Handle edit request
-      const updateData = JSON.parse(new_data);
-      const setClauses = Object.keys(updateData).map(key => `${key} = ?`).join(', ');
-      const values = [...Object.values(updateData), record_id];
-      await run(`UPDATE ${table_name} SET ${setClauses} WHERE id = ?`, values);
-    } else if (request[0].action === 'delete') {
-      // Handle delete request
-      await run(`DELETE FROM ${table_name} WHERE id = ?`, [record_id]);
+    if (!req.session?.user || req.session.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden' });
     }
-    await run('UPDATE requests SET status = ? WHERE id = ?', ['approved', id]);
-    res.json({ success: true, message: 'Request approved' });
-  } catch (err) {
-    console.error('Error approving request:', err);
-    res.status(500).json({ error: err.message });
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid request id' });
+
+    const r = await getRequestById(id);
+    if (!r) return res.status(404).json({ error: 'Request not found' });
+    if (r.status && r.status !== 'pending') {
+      return res.status(400).json({ error: `Request already ${r.status}` });
+    }
+
+    const action = String(r.action || 'update').toLowerCase();
+    const table = String(r.table_name || '').trim();
+    const recordId = Number(r.record_id);
+
+    if (!table) return res.status(400).json({ error: 'Missing table_name in request' });
+    if (!Number.isInteger(recordId) || recordId <= 0) {
+      return res.status(400).json({ error: 'Invalid record_id in request' });
+    }
+
+    // Data to apply (prefer new_data; fallback to data)
+    const newData = parseJSONSafe(r.new_data) ?? parseJSONSafe(r.data) ?? {};
+
+    if (action === 'delete') {
+      await applyDelete(table, recordId);
+    } else if (action === 'update') {
+      const clean = await sanitizeUpdate(table, newData);
+      // If nothing to apply, still mark approved to clear the queue
+      await applyUpdate(table, recordId, clean);
+    } else {
+      return res.status(400).json({ error: `Unsupported action: ${action}` });
+    }
+
+    await run(`UPDATE requests SET status = 'approved' WHERE id = ?`, [id]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('POST /requests/approve error:', e);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
-// Reject request (admin)
+// Reject a request
 router.post('/reject/:id', async (req, res) => {
-  if (req.session.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
   try {
-    await run('UPDATE requests SET status = ?, approver_id = ? WHERE id = ?', ['rejected', req.session.user.id, req.params.id]);
-    res.json({ success: true, message: 'Request rejected' });
-  } catch (err) {
-    console.error('Error rejecting request:', err);
-    res.status(500).json({ error: err.message });
+    if (!req.session?.user || req.session.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid request id' });
+    const r = await getRequestById(id);
+    if (!r) return res.status(404).json({ error: 'Request not found' });
+    if (r.status && r.status !== 'pending') {
+      return res.status(400).json({ error: `Request already ${r.status}` });
+    }
+    await run(`UPDATE requests SET status = 'rejected' WHERE id = ?`, [id]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('POST /requests/reject error:', e);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
