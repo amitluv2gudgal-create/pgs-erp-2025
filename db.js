@@ -8,8 +8,8 @@ import path from 'path';
 // Prefer an absolute Disk path in production. Fallback keeps local dev working.
 const DATA_DIR =
   process.env.DATA_DIR ||
-  path.dirname(process.env.DB_PATH || '') ||            // if DB_PATH=/var/data/database.db
-  '/var/data';                                          // Render's common Disk mount
+  path.dirname(process.env.DB_PATH || '') ||
+  '/var/data';
 
 const DB_FILE = process.env.DB_PATH
   ? path.basename(process.env.DB_PATH)
@@ -37,10 +37,17 @@ export async function initDB() {
     role TEXT
   )`);
 
+  // NOTE: fresh installs get the new columns here;
+  // existing installs will be upgraded by ensureClientExtraFields() below.
   await db.run(`CREATE TABLE IF NOT EXISTS clients (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT,
-    address TEXT,
+    address TEXT,              -- legacy (unused by new UI)
+    address_line1 TEXT,        -- NEW
+    address_line2 TEXT,        -- NEW
+    po_dated TEXT,             -- NEW
+    state TEXT,
+    district TEXT,
     contact TEXT,
     telephone TEXT,
     email TEXT,
@@ -155,58 +162,49 @@ export async function initDB() {
     FOREIGN KEY(created_by) REFERENCES users(id)
   )`);
 
-  // --- Seed admin if missing ---
-  const adminUsername = process.env.ADMIN_USERNAME || 'admin';
-  const existing = await db.get('SELECT id FROM users WHERE username = ?', adminUsername);
-  if (!existing) {
-    const plain = process.env.ADMIN_PASSWORD || 'Admin@123';
-    const hash = await bcrypt.hash(plain, 10);
-    await db.run(
-      'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
-      adminUsername, hash, 'admin'
-    );
-    console.log(`[seed] Admin created → ${adminUsername}`);
-  }
-
-   // --- Seed accountant if missing ---
-const accountantUsername = process.env.ACCOUNTANT_USERNAME || 'accountant';
-const existingAcc = await db.get('SELECT id FROM users WHERE username = ?', accountantUsername);
-if (!existingAcc) {
-  const plain = process.env.ACCOUNTANT_PASSWORD || 'Account@123';
-  const hash = await bcrypt.hash(plain, 10);
-  await db.run(
-    'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
-    accountantUsername, hash, 'accountant'
-  );
-  console.log(`[seed] Accountant created → ${accountantUsername}`);
-}
-
-// --- Seed HR if missing ---
-const hrUsername = process.env.HR_USERNAME || 'hr';
-const existingHr = await db.get('SELECT id FROM users WHERE username = ?', hrUsername);
-if (!existingHr) {
-  const plain = process.env.HR_PASSWORD || 'Hr@123';
-  const hash = await bcrypt.hash(plain, 10);
-  await db.run(
-    'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
-    hrUsername, hash, 'hr'
-  );
-  console.log(`[seed] HR created → ${hrUsername}`);
-}
-
-  
-  if (!existing) {
-    const plain = process.env.ADMIN_PASSWORD || 'Admin@123';
-    const hash = await bcrypt.hash(plain, 10);
-    await db.run(
-      'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
-      adminUsername, hash, 'admin'
-    );
-    console.log(`[seed] Admin created → ${adminUsername}`);
-  }
+  // --- Seed default users if missing ---
+  await seedUser('admin', process.env.ADMIN_PASSWORD || 'Admin@123', 'admin');
+  await seedUser('accountant', process.env.ACCOUNTANT_PASSWORD || 'Account@123', 'accountant');
+  await seedUser('hr', process.env.HR_PASSWORD || 'Hr@123', 'hr');
 
   console.log('[db] SQLite file:', DB_PATH);
   return db;
+}
+
+async function seedUser(username, plain, role) {
+  const db = await getDB();
+  const existing = await db.get('SELECT id FROM users WHERE username = ?', username);
+  if (!existing) {
+    const hash = await bcrypt.hash(plain, 10);
+    await db.run('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', username, hash, role);
+    console.log(`[seed] ${role} created → ${username}`);
+  }
+}
+
+// --- Safe migration for existing databases ---
+export async function ensureClientExtraFields() {
+  const cols = await query(`PRAGMA table_info(clients)`);
+  const names = new Set(cols.map(c => c.name));
+
+  const toAdd = [];
+  if (!names.has('address_line1')) toAdd.push(`ADD COLUMN address_line1 TEXT`);
+  if (!names.has('address_line2')) toAdd.push(`ADD COLUMN address_line2 TEXT`);
+  if (!names.has('po_dated'))     toAdd.push(`ADD COLUMN po_dated TEXT`);
+  if (!names.has('state'))        toAdd.push(`ADD COLUMN state TEXT`);
+  if (!names.has('district'))     toAdd.push(`ADD COLUMN district TEXT`);
+
+  for (const clause of toAdd) {
+    await run(`ALTER TABLE clients ${clause}`);
+  }
+
+  // Optional: backfill line1 from legacy single-line address
+  if (!names.has('address_line1')) {
+    await run(`
+      UPDATE clients
+      SET address_line1 = COALESCE(NULLIF(address_line1, ''), address)
+      WHERE (address_line1 IS NULL OR address_line1 = '') AND address IS NOT NULL
+    `);
+  }
 }
 
 export async function query(sql, params = []) {
