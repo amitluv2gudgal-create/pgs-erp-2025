@@ -207,6 +207,74 @@ export async function ensureClientExtraFields() {
   }
 }
 
+// Safely drop legacy 'address' column from clients.
+// 1) Try ALTER TABLE ... DROP COLUMN (SQLite >= 3.35).
+// 2) Fallback: rebuild the table without the 'address' column.
+export async function dropLegacyClientAddressColumn() {
+  // Check if 'address' column exists
+  const cols = await query(`PRAGMA table_info(clients)`);
+  const hasLegacy = cols.some(c => c.name === 'address');
+  if (!hasLegacy) return; // nothing to do
+
+  try {
+    // Fast path for newer SQLite builds
+    await run(`ALTER TABLE clients DROP COLUMN address`);
+    console.log('[migrate] Dropped legacy clients.address via ALTER TABLE');
+    return;
+  } catch (e) {
+    console.warn('[migrate] ALTER TABLE DROP COLUMN not available, rebuilding table…');
+  }
+
+  // Rebuild path (works on all SQLite versions)
+  // Preserve all columns EXCEPT 'address'
+  await run('PRAGMA foreign_keys = OFF');
+  await run('BEGIN TRANSACTION');
+
+  try {
+    await run(`
+      CREATE TABLE clients_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        address_line1 TEXT,
+        address_line2 TEXT,
+        po_dated TEXT,
+        state TEXT,
+        district TEXT,
+        contact TEXT,
+        telephone TEXT,
+        email TEXT,
+        cgst REAL,
+        sgst REAL
+      )
+    `);
+
+    await run(`
+      INSERT INTO clients_new (
+        id, name, address_line1, address_line2, po_dated, state, district,
+        contact, telephone, email, cgst, sgst
+      )
+      SELECT
+        id, name, address_line1, address_line2, po_dated, state, district,
+        contact, telephone, email, cgst, sgst
+      FROM clients
+    `);
+
+    await run(`DROP TABLE clients`);
+    await run(`ALTER TABLE clients_new RENAME TO clients`);
+
+    await run('COMMIT');
+    console.log('[migrate] Rebuilt clients table without legacy address column');
+  } catch (e) {
+    await run('ROLLBACK');
+    await run('PRAGMA foreign_keys = ON');
+    console.error('[migrate] Failed to rebuild clients table:', e);
+    throw e;
+  }
+
+  await run('PRAGMA foreign_keys = ON');
+}
+
+
 export async function query(sql, params = []) {
   const db = await getDB();
   return db.all(sql, params);
