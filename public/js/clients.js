@@ -80,6 +80,7 @@ window.showClientForm = () => {
       <option value="workman skilled">Workman Skilled</option>
       <option value="bouncer">Bouncer</option>
       <option value="gunman">Gunman</option>
+      <option value="cctv operator">CCTV Operator</option> 
     </select>
     <input type="number" step="0.01" placeholder="Monthly Rate" class="cat-rate" style="width:160px;">
   `;
@@ -388,6 +389,7 @@ function openAddCategoryModal(id) {
   <option value="workman skilled">Workman Skilled</option>
   <option value="bouncer">Bouncer</option>
   <option value="gunman">Gunman</option>
+  <option value="cctv operator">CCTV Oprator</option>
 </select>
 
       </label>
