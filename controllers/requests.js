@@ -1,88 +1,104 @@
 // controllers/requests.js
 import express from 'express';
-import { run, query } from '../db.js';
+import { query, run } from '../db.js';
 
 const router = express.Router();
 
-// ========== helper to log a new request ==========
-export async function createRequest(table, record_id, action, data, new_data = null) {
-  // Always stringify safely
-  const dataStr = data ? JSON.stringify(data) : null;
-  const newDataStr = new_data ? JSON.stringify(new_data) : null;
-  await run(
-    `INSERT INTO requests (table_name, record_id, action, data, new_data, status)
-     VALUES (?, ?, ?, ?, ?, 'pending')`,
-    [table, record_id, action, dataStr, newDataStr]
-  );
+/**
+ * Create a new pending request (used by HR/Account to propose edits/deletes)
+ * Signature kept SAME as your previous file so imports continue to work:
+ *   createRequest(requester_id, action, table_name, record_id, new_data)
+ */
+export async function createRequest(requester_id, action, table_name, record_id, new_data) {
+  try {
+    const newDataStr = new_data ? (typeof new_data === 'string' ? new_data : JSON.stringify(new_data)) : null;
+    await run(
+      `INSERT INTO requests (requester_id, action, table_name, record_id, data, new_data, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+      [requester_id, action, table_name, record_id, null, newDataStr]
+    );
+  } catch (err) {
+    console.error('Error creating request:', err);
+    throw err;
+  }
 }
 
-
-// Helpers ----------------------------------------------------
-
-/** Get list of column names for a table from SQLite */
-async function getTableColumns(table) {
-  const cols = await query(`PRAGMA table_info(${table})`);
-  return cols.map(c => c.name);
-}
-
-/** Parse JSON safely */
+/* ------------------- helpers for approval pipeline ------------------- */
 function parseJSONSafe(s) {
   if (s == null) return null;
   try { return typeof s === 'string' ? JSON.parse(s) : s; } catch { return null; }
 }
 
-/** Prepare sanitized update payload: intersect keys with actual columns, apply legacy mappings */
+async function getTableColumns(table) {
+  const cols = await query(`PRAGMA table_info(${table})`);
+  return cols.map(c => c.name);
+}
+
 async function sanitizeUpdate(table, payloadRaw) {
   const payload = { ...(payloadRaw || {}) };
 
-  // Legacy → new column mapping for clients
+  // Map legacy client field(s) to new ones
   if (table === 'clients') {
     if (payload.address && !payload.address_line1) {
       payload.address_line1 = payload.address;
     }
-    delete payload.address; // ensure we never try to write legacy column
+    delete payload.address; // never try to write the legacy column
   }
 
-  const cols = await getTableColumns(table);
-  const allowed = new Set(cols);
+  // Keep only real columns
+  const actualCols = new Set(await getTableColumns(table));
+  delete payload.id; // never overwrite PK
 
-  // Never allow id overwrite
-  delete payload.id;
-
-  // Keep only known columns
   const clean = {};
   for (const [k, v] of Object.entries(payload)) {
-    if (allowed.has(k)) clean[k] = v;
+    if (actualCols.has(k)) clean[k] = v;
   }
   return clean;
 }
 
-/** Apply an UPDATE */
 async function applyUpdate(table, id, clean) {
   const keys = Object.keys(clean);
-  if (!keys.length) {
-    // nothing to update; treat as success
-    return { changes: 0 };
-  }
+  if (keys.length === 0) return { changes: 0 };
   const setClause = keys.map(k => `${k} = ?`).join(', ');
   const values = keys.map(k => clean[k]);
-  return await run(`UPDATE ${table} SET ${setClause} WHERE id = ?`, [...values, id]);
+  return run(`UPDATE ${table} SET ${setClause} WHERE id = ?`, [...values, id]);
 }
 
-/** Apply a DELETE */
-async function applyDelete(table, id) {
-  return await run(`DELETE FROM ${table} WHERE id = ?`, [id]);
-}
+/* ----------------------------- routes ----------------------------- */
 
-/** Load one request row by id */
-async function getRequestById(id) {
-  const rows = await query(`SELECT * FROM requests WHERE id = ?`, [id]);
-  return rows[0] || null;
-}
+// Create request (from frontend HR/Account)
+router.post('/', async (req, res) => {
+  try {
+    if (!req.session?.user || !['accountant', 'hr'].includes(req.session.user.role)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const { action, table_name, record_id, data } = req.body || {};
+    if (!action || !table_name || !record_id) {
+      return res.status(400).json({ error: 'Missing required parameters: action, table_name, record_id' });
+    }
+    await createRequest(req.session.user.id, action, table_name, Number(record_id), data || null);
+    res.json({ message: 'Request created successfully. Awaiting admin approval.' });
+  } catch (err) {
+    console.error('Error creating request:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
-// Routes -----------------------------------------------------
+// Get pending requests (ADMIN) — used by your UI: /api/requests/pending
+router.get('/pending', async (req, res) => {
+  try {
+    if (!req.session?.user || req.session.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const rows = await query(`SELECT * FROM requests WHERE status = 'pending' ORDER BY id DESC`);
+    res.json(rows);
+  } catch (err) {
+    console.error('GET /requests/pending error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
-// List pending requests
+// (Optional) List all requests (ADMIN)
 router.get('/', async (req, res) => {
   try {
     if (!req.session?.user || req.session.user.role !== 'admin') {
@@ -96,7 +112,23 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Approve a request (update/delete)
+// Verify Attendance (HR)
+router.post('/verify-attendance/:id', async (req, res) => {
+  try {
+    if (!req.session?.user || req.session.user.role !== 'hr') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid attendance id' });
+    await run(`UPDATE attendances SET status = 'verified' WHERE id = ? AND status = 'pending'`, [id]);
+    res.json({ message: 'Attendance verified' });
+  } catch (e) {
+    console.error('verify-attendance error:', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Approve request (ADMIN)
 router.post('/approve/:id', async (req, res) => {
   try {
     if (!req.session?.user || req.session.user.role !== 'admin') {
@@ -105,43 +137,38 @@ router.post('/approve/:id', async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid request id' });
 
-    const r = await getRequestById(id);
-    if (!r) return res.status(404).json({ error: 'Request not found' });
-    if (r.status && r.status !== 'pending') {
-      return res.status(400).json({ error: `Request already ${r.status}` });
-    }
+    const rows = await query(`SELECT * FROM requests WHERE id = ? AND status = 'pending'`, [id]);
+    if (!rows.length) return res.status(404).json({ error: 'Request not found or already processed' });
 
+    const r = rows[0];
     const action = String(r.action || 'update').toLowerCase();
     const table = String(r.table_name || '').trim();
     const recordId = Number(r.record_id);
+    const newData = parseJSONSafe(r.new_data) ?? parseJSONSafe(r.data) ?? {};
 
     if (!table) return res.status(400).json({ error: 'Missing table_name in request' });
     if (!Number.isInteger(recordId) || recordId <= 0) {
       return res.status(400).json({ error: 'Invalid record_id in request' });
     }
 
-    // Data to apply (prefer new_data; fallback to data)
-    const newData = parseJSONSafe(r.new_data) ?? parseJSONSafe(r.data) ?? {};
-
     if (action === 'delete') {
-      await applyDelete(table, recordId);
+      await run(`DELETE FROM ${table} WHERE id = ?`, [recordId]);
     } else if (action === 'update') {
       const clean = await sanitizeUpdate(table, newData);
-      // If nothing to apply, still mark approved to clear the queue
       await applyUpdate(table, recordId, clean);
     } else {
       return res.status(400).json({ error: `Unsupported action: ${action}` });
     }
 
-    await run(`UPDATE requests SET status = 'approved' WHERE id = ?`, [id]);
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('POST /requests/approve error:', e);
-    res.status(500).json({ error: 'Server error' });
+    await run(`UPDATE requests SET status = 'approved', approver_id = ? WHERE id = ?`, [req.session.user.id, id]);
+    res.json({ ok: true, message: 'Request approved' });
+  } catch (err) {
+    console.error('POST /requests/approve error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Reject a request
+// Reject request (ADMIN)
 router.post('/reject/:id', async (req, res) => {
   try {
     if (!req.session?.user || req.session.user.role !== 'admin') {
@@ -149,16 +176,15 @@ router.post('/reject/:id', async (req, res) => {
     }
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid request id' });
-    const r = await getRequestById(id);
-    if (!r) return res.status(404).json({ error: 'Request not found' });
-    if (r.status && r.status !== 'pending') {
-      return res.status(400).json({ error: `Request already ${r.status}` });
-    }
-    await run(`UPDATE requests SET status = 'rejected' WHERE id = ?`, [id]);
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('POST /requests/reject error:', e);
-    res.status(500).json({ error: 'Server error' });
+
+    const rows = await query(`SELECT * FROM requests WHERE id = ? AND status = 'pending'`, [id]);
+    if (!rows.length) return res.status(404).json({ error: 'Request not found or already processed' });
+
+    await run(`UPDATE requests SET status = 'rejected', approver_id = ? WHERE id = ?`, [req.session.user.id, id]);
+    res.json({ ok: true, message: 'Request rejected' });
+  } catch (err) {
+    console.error('POST /requests/reject error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
