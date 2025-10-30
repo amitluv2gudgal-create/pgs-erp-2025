@@ -458,3 +458,7 @@ function escHtml(s) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[m]));
 }
+
+// Compatibility shims for legacy inline onclicks (safe to keep alongside delegation)
+window.openEditClient = (id) => { try { openEditClientModal(Number(id)); } catch(e) { console.error(e); } };
+window.showCategoryForm = (id) => { try { openAddCategoryModal(Number(id)); } catch(e) { console.error(e); } };
