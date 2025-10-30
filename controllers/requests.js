@@ -143,21 +143,40 @@ router.post('/approve/:id', async (req, res) => {
     const r = rows[0];
     const action = String(r.action || 'update').toLowerCase();
     const table = String(r.table_name || '').trim();
-    const recordId = Number(r.record_id);
-    const newData = parseJSONSafe(r.new_data) ?? parseJSONSafe(r.data) ?? {};
 
-    if (!table) return res.status(400).json({ error: 'Missing table_name in request' });
+    // Prefer new_data; fallback to data
+    const rawData = parseJSONSafe(r.new_data) ?? parseJSONSafe(r.data) ?? {};
+    // Coalesce record id from record_id or payload.id
+    let recordId = Number(r.record_id);
     if (!Number.isInteger(recordId) || recordId <= 0) {
-      return res.status(400).json({ error: 'Invalid record_id in request' });
+      const possible = Number(rawData?.id);
+      if (Number.isInteger(possible) && possible > 0) recordId = possible;
+    }
+
+    // If table missing or recordId still invalid, clear this legacy request as a no-op approval
+    if (!table || !Number.isInteger(recordId) || recordId <= 0) {
+      await run(
+        `UPDATE requests SET status = 'approved', approver_id = ?, new_data = ?, data = ?
+           WHERE id = ?`,
+        [
+          req.session.user.id,
+          JSON.stringify({ note: 'No-op approval: missing/invalid table or record_id in legacy request' }),
+          r.data,
+          id
+        ]
+      );
+      return res.json({ ok: true, message: 'Approved (no-op). Legacy request lacked valid record id/table.' });
     }
 
     if (action === 'delete') {
       await run(`DELETE FROM ${table} WHERE id = ?`, [recordId]);
     } else if (action === 'update') {
-      const clean = await sanitizeUpdate(table, newData);
+      const clean = await sanitizeUpdate(table, rawData); // maps legacy address, drops unknown cols
       await applyUpdate(table, recordId, clean);
     } else {
-      return res.status(400).json({ error: `Unsupported action: ${action}` });
+      // Unknown action → mark as approved no-op to unblock queue
+      await run(`UPDATE requests SET status = 'approved', approver_id = ? WHERE id = ?`, [req.session.user.id, id]);
+      return res.json({ ok: true, message: `Approved (no-op). Unsupported action: ${action}` });
     }
 
     await run(`UPDATE requests SET status = 'approved', approver_id = ? WHERE id = ?`, [req.session.user.id, id]);
@@ -167,6 +186,7 @@ router.post('/approve/:id', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // Reject request (ADMIN)
 router.post('/reject/:id', async (req, res) => {
