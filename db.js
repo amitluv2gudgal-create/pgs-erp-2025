@@ -55,6 +55,8 @@ export async function initDB() {
     sgst REAL
   )`);
 
+
+
   await db.run(`CREATE TABLE IF NOT EXISTS client_categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     client_id INTEGER,
@@ -242,6 +244,38 @@ export async function ensureClientExtraFields() {
       SET address_line1 = COALESCE(NULLIF(address_line1, ''), address)
       WHERE (address_line1 IS NULL OR address_line1 = '') AND address IS NOT NULL
     `);
+  }
+}
+
+// db.js — add near your init/bootstrap code (example using sqlite3 style API)
+async function ensureClientColumns(db) {
+  try {
+    // Get columns
+    const rows = await new Promise((resolve, reject) => {
+      db.all("PRAGMA table_info(clients);", (err, rows) => err ? reject(err) : resolve(rows));
+    });
+
+    const colNames = Array.isArray(rows) ? rows.map(r => r.name) : [];
+
+    if (!colNames.includes('gst_number')) {
+      console.log('[db] Adding gst_number to clients');
+      await new Promise((resolve, reject) => {
+        db.run("ALTER TABLE clients ADD COLUMN gst_number TEXT;", (err) => err ? reject(err) : resolve());
+      });
+    } else {
+      console.log('[db] clients.gst_number already exists');
+    }
+
+    if (!colNames.includes('igst')) {
+      console.log('[db] Adding igst to clients');
+      await new Promise((resolve, reject) => {
+        db.run("ALTER TABLE clients ADD COLUMN igst REAL;", (err) => err ? reject(err) : resolve());
+      });
+    } else {
+      console.log('[db] clients.igst already exists');
+    }
+  } catch (err) {
+    console.error('[db] ensureClientColumns error:', err);
   }
 }
 
