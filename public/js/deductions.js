@@ -1,11 +1,26 @@
 // public/js/deductions.js
 // - loadDeductions(): list for table
 // - window.showDeductionForm(): render create form with Employee dropdown + clear after submit
-// Local helper to avoid name clashes
+// Always include credentials so session cookie is sent
+const fetchAuth = (url, opts = {}) => fetch(url, { credentials: 'include', ...opts });
+
+/**
+ * Local helper to fetch employees if loadEmployees() isn't available.
+ * If your app exports a loadEmployees() function (recommended), that will be used.
+ */
 async function fetchEmployeesList() {
   try {
-    const r = await fetch('/api/employees');
-    if (!r.ok) throw new Error(await r.text());
+    // Prefer the shared loader if present
+    if (typeof loadEmployees === 'function') {
+      const list = await loadEmployees();
+      return Array.isArray(list) ? list : [];
+    }
+    // Fallback: direct fetch with credentials
+    const r = await fetchAuth('/api/employees');
+    if (!r.ok) {
+      console.error('fetchEmployeesList: /api/employees returned', r.status, await r.text().catch(()=>r.statusText));
+      return [];
+    }
     const list = await r.json();
     return Array.isArray(list) ? list : [];
   } catch (e) {
@@ -14,11 +29,13 @@ async function fetchEmployeesList() {
   }
 }
 
-
 export async function loadDeductions() {
   try {
-    const res = await fetch('/api/deductions');
-    if (!res.ok) throw new Error(await res.text());
+    const res = await fetchAuth('/api/deductions');
+    if (!res.ok) {
+      console.error('loadDeductions: failed', res.status, await res.text().catch(()=>res.statusText));
+      return [];
+    }
     return await res.json();
   } catch (err) {
     console.error('loadDeductions error:', err);
@@ -36,18 +53,27 @@ function escapeHTML(s) {
     .replaceAll("'", '&#39;');
 }
 
+/**
+ * Populate employee select by id.
+ * selectId should be the id of the <select> element (e.g. 'ded_employee_id')
+ */
 async function populateEmployeeDropdown(selectId) {
   const sel = document.getElementById(selectId);
-  if (!sel) return;
+  if (!sel) {
+    console.warn('populateEmployeeDropdown: select not found:', selectId);
+    return;
+  }
+
+  sel.innerHTML = '<option value="">Loading employees...</option>';
   try {
-    const emps = (typeof loadEmployees === 'function') ? await loadEmployees() : [];
+    const emps = await fetchEmployeesList();
     if (!Array.isArray(emps) || emps.length === 0) {
       sel.innerHTML = '<option value="">No employees available</option>';
       return;
     }
-    sel.innerHTML = ['<option value="">Select Employee</option>']
-      .concat(emps.map(e => `<option value="${e.id}">${escapeHTML(e.name || `ID ${e.id}`)} (ID: ${e.id})</option>`))
-      .join('');
+    // Build options
+    sel.innerHTML = '<option value="">Select Employee</option>' +
+      emps.map(e => `<option value="${e.id}">${escapeHTML(e.name || `ID ${e.id}`)} (ID: ${e.id})</option>`).join('');
   } catch (e) {
     console.error('populateEmployeeDropdown error:', e);
     sel.innerHTML = '<option value="">Failed to load employees</option>';
@@ -106,6 +132,7 @@ window.showDeductionForm = async () => {
     </form>
   `;
 
+  // Populate employees into dropdown (with credentials)
   await populateEmployeeDropdown('ded_employee_id');
 
   const form = document.getElementById('deductionForm');
@@ -128,14 +155,20 @@ window.showDeductionForm = async () => {
     if (!(amount > 0)) { alert('Amount must be greater than 0'); submitBtn.disabled = false; return; }
 
     try {
-      const res = await fetch('/api/deductions', {
+      const res = await fetchAuth('/api/deductions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ employee_id, month, reason, amount, note })
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        // try to parse error
+        let body = '';
+        try { body = (await res.json()).error || JSON.stringify(await res.json()); } catch(_) { body = await res.text().catch(()=>res.statusText); }
+        throw new Error(body || `Status ${res.status}`);
+      }
       alert('Deduction saved');
       form.reset();
+      if (typeof window.showTable === 'function') window.showTable('deductions');
     } catch (err) {
       console.error('Create deduction error:', err);
       alert('Failed to save: ' + (err.message || 'Unknown error'));
@@ -147,23 +180,21 @@ window.showDeductionForm = async () => {
 
 // === EDIT DEDUCTION MODAL ===
 // Schema: id, employee_id, amount, reason, date, month
-// Uses optional employee dropdown if loadEmployees() is available.
+// Uses fetchEmployeesList() which includes credentials
 window.openEditDeduction = async (id) => {
   try {
-    const r = await fetch(`/api/deductions/${id}`);
+    const r = await fetchAuth(`/api/deductions/${id}`);
     if (!r.ok) throw new Error(await r.text());
     const d = await r.json();
 
-    // Try to load employees for a nicer dropdown; fall back to plain input if not available
+    // Try to load employees for a nicer dropdown; fall back to simple input if not available
     let employees = [];
     try {
-      if (typeof fetchEmployeesList === 'function') {
-        const employees = await fetchEmployeesList();
-      } else {
-        const rr = await fetch('/api/employees');
-        if (rr.ok) employees = await rr.json();
-      }
-    } catch (_) {}
+      employees = await fetchEmployeesList();
+    } catch (e) {
+      console.warn('openEditDeduction: failed to load employees list', e);
+      employees = [];
+    }
 
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:9999';
@@ -172,7 +203,7 @@ window.openEditDeduction = async (id) => {
 
     const empSelect = (Array.isArray(employees) && employees.length)
       ? `<select id="ded_employee_id">
-           ${employees.map(e => `<option value="${e.id}" ${Number(e.id)===Number(d.employee_id)?'selected':''}>${(e.name||'Employee')} (ID: ${e.id})</option>`).join('')}
+           ${employees.map(e => `<option value="${e.id}" ${Number(e.id)===Number(d.employee_id)?'selected':''}>${escapeHTML(e.name||'Employee')} (ID: ${e.id})</option>`).join('')}
          </select>`
       : `<input type="number" id="ded_employee_id" value="${d.employee_id ?? ''}" placeholder="Employee ID">`;
 
@@ -184,7 +215,7 @@ window.openEditDeduction = async (id) => {
       <form id="dedEditForm">
         <label>Employee:<br>${empSelect}</label><br><br>
         <label>Amount:<br><input type="number" step="0.01" id="ded_amount" value="${d.amount ?? ''}" required></label><br><br>
-        <label>Reason:<br><input type="text" id="ded_reason" value="${d.reason || ''}"></label><br><br>
+        <label>Reason:<br><input type="text" id="ded_reason" value="${escapeHTML(d.reason || '')}"></label><br><br>
         <label>Date:<br><input type="date" id="ded_date" value="${String(d.date||'').slice(0,10)}"></label><br><br>
         <label>Month (YYYY-MM):<br><input type="text" id="ded_month" value="${d.month || ''}" placeholder="2025-09"></label><br><br>
         <div style="display:flex;gap:8px;justify-content:flex-end;">
@@ -202,10 +233,8 @@ window.openEditDeduction = async (id) => {
 
     document.getElementById('dedEditForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const employee_id = (() => {
-        const el = document.getElementById('ded_employee_id');
-        return el.tagName === 'SELECT' ? parseInt(el.value,10) : parseInt(el.value,10);
-      })();
+      const el = document.getElementById('ded_employee_id');
+      const employee_id = el && el.tagName === 'SELECT' ? parseInt(el.value,10) : parseInt(el.value,10);
       const payload = {
         employee_id: Number.isFinite(employee_id) ? employee_id : d.employee_id,
         amount: parseFloat(document.getElementById('ded_amount').value || 0) || 0,
@@ -214,15 +243,19 @@ window.openEditDeduction = async (id) => {
         month: document.getElementById('ded_month').value.trim() || d.month
       };
       try {
-        const u = await fetch(`/api/deductions/${id}`, {
+        const u = await fetchAuth(`/api/deductions/${id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        if (!u.ok) throw new Error(await u.text());
+        if (!u.ok) {
+          let err = '';
+          try { err = (await u.json()).error || JSON.stringify(await u.json()); } catch(_) { err = await u.text().catch(()=>u.statusText); }
+          throw new Error(err || `Status ${u.status}`);
+        }
         alert('Deduction updated');
         close();
-        if (window.showTable) window.showTable('deductions');
+        if (typeof window.showTable === 'function') window.showTable('deductions');
       } catch (err) {
         console.error('deduction update error:', err);
         alert('Update failed: ' + (err.message || 'Unknown error'));
