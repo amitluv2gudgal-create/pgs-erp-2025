@@ -8,7 +8,7 @@ const router = express.Router();
 router.get('/', async (req, res) => {
   try {
     // Return common join to include employee name (if you already do that adjust accordingly)
-    const rows = await dbQuery(`SELECT d.id, d.employee_id, d.amount, d.reason, d.date, d.month, d.note,
+    const rows = await query(`SELECT d.id, d.employee_id, d.amount, d.reason, d.date, d.month, d.note,
                                       e.name AS employee_name
                                FROM deductions d
                                LEFT JOIN employees e ON e.id = d.employee_id
@@ -24,7 +24,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const rows = await dbQuery('SELECT * FROM deductions WHERE id = ?', [id]);
+    const rows = await query('SELECT * FROM deductions WHERE id = ?', [id]);
     if (!rows || rows.length === 0) return res.status(404).json({ error: 'Not found' });
     res.json(rows[0]);
   } catch (err) {
@@ -44,7 +44,7 @@ router.post('/', async (req, res) => {
     }
 
     const dateNow = new Date().toISOString();
-    const result = await dbRun(
+    const result = await run(
       `INSERT INTO deductions (employee_id, amount, reason, date, month, note)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [employee_id, amount, reason, dateNow, month, note ?? null]
@@ -65,7 +65,7 @@ router.put('/:id', async (req, res) => {
     const id = Number(req.params.id);
     const { employee_id, amount, reason, date, month, note } = req.body;
 
-    await dbRun(
+    await run(
       `UPDATE deductions SET employee_id = ?, amount = ?, reason = ?, date = ?, month = ?, note = ? WHERE id = ?`,
       [employee_id, amount, reason, date || null, month || null, note ?? null, id]
     );
@@ -80,7 +80,7 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
-    await dbRun('DELETE FROM deductions WHERE id = ?', [id]);
+    await run('DELETE FROM deductions WHERE id = ?', [id]);
     res.json({ ok: true });
   } catch (err) {
     console.error('DELETE /api/deductions/:id error', err);

@@ -48,9 +48,10 @@ window.showClientForm = () => {
 
       <label>Telephone<br><input type="text" id="c_telephone" placeholder="+91-..."></label><br><br>
       <label>Email<br><input type="email" id="c_email" placeholder="name@company.com"></label><br><br>
+      <label>GST Number<br><input type="text" id="c_gst_number" placeholder="Optional"></label><br><br>
       <label>CGST (%)<br><input type="number" step="0.01" id="c_cgst" placeholder="9"></label><br><br>
       <label>SGST (%)<br><input type="number" step="0.01" id="c_sgst" placeholder="9"></label><br><br>
-
+      <label>IGST (%)<br><input type="number" step="0.01" id="c_igst" placeholder="18"></label><br><br>
       <div id="categoriesContainer">
         <h4>Categories (optional)</h4>
       </div>
@@ -80,7 +81,9 @@ window.showClientForm = () => {
       <option value="workman skilled">Workman Skilled</option>
       <option value="bouncer">Bouncer</option>
       <option value="gunman">Gunman</option>
-      <option value="cctv operator">CCTV Operator</option> 
+      <option value="cctv operator">CCTV Operator</option>
+      <option value="office boy">Office Boy</option>
+      <option value="steward">Steward</option> 
     </select>
     <input type="number" step="0.01" placeholder="Monthly Rate" class="cat-rate" style="width:160px;">
   `;
@@ -101,9 +104,11 @@ window.showClientForm = () => {
       district: valOrNull(document.getElementById('c_district').value),
       po_dated: valOrNull(document.getElementById('c_po_dated').value),
       telephone: valOrNull(document.getElementById('c_telephone').value),
+      gst_number: valOrNull(document.getElementById('c_gst_number').value),
       email: valOrNull(document.getElementById('c_email').value),
       cgst: numOrZero(document.getElementById('c_cgst').value),
       sgst: numOrZero(document.getElementById('c_sgst').value),
+      igst: numOrZero(document.getElementById('c_igst').value),
     };
     if (!payload.name) {
       alert('Client name is required');
@@ -186,9 +191,11 @@ function __clientsTableHTML(rows = []) {
             <td>${esc(c.state || '')}</td>
             <td>${esc(c.district || '')}</td>
             <td>${esc(c.telephone || '')}</td>
+            <td>${esc(c.gst_number || '')}</td>
             <td>${esc(c.email || '')}</td>
             <td>${esc(c.cgst ?? '')}</td>
             <td>${esc(c.sgst ?? '')}</td>
+            <td>${esc(c.igst ?? '')}</td>
             <td>${esc(c.categories || '')}</td>
             <td>
               <button class="btn-edit-client">Edit</button>
@@ -216,6 +223,7 @@ function __filterClientsData(data, query, exact) {
       String(c.state ?? ''),
       String(c.district ?? ''),
       String(c.telephone ?? ''),
+      String(c.gst_number ?? ''),
       String(c.email ?? ''),
       String(c.categories ?? '')
     ];
@@ -338,9 +346,11 @@ async function openEditClientModal(id) {
       state: valOrNull(card.querySelector('#e_state').value),
       district: valOrNull(card.querySelector('#e_district').value),
       telephone: valOrNull(card.querySelector('#e_tel').value),
+      gst_number: valOrNull(card.querySelector('#e_gst').value),
       email: valOrNull(card.querySelector('#e_email').value),
       cgst: numOrNull(card.querySelector('#e_cgst').value),
       sgst: numOrNull(card.querySelector('#e_sgst').value),
+      igst: numOrNull(card.querySelector('#e_igst').value),
     };
     if (!payload.name) {
       card.querySelector('#cl_edit_msg').textContent = 'Client name is required.';
@@ -390,6 +400,8 @@ function openAddCategoryModal(id) {
   <option value="bouncer">Bouncer</option>
   <option value="gunman">Gunman</option>
   <option value="cctv operator">CCTV Oprator</option>
+  <option value="office boy">Office Boy</option>
+  <option value="steward">Steward</option>
 </select>
 
       </label>

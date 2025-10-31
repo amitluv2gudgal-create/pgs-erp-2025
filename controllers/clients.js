@@ -43,8 +43,10 @@ router.post('/', async (req, res) => {
       district,
       telephone,
       email,
+      gst_number,
       cgst = 0,
-      sgst = 0
+      sgst = 0,
+      igst = 0
     } = req.body || {};
 
     if (!name || !String(name).trim()) {
@@ -53,8 +55,8 @@ router.post('/', async (req, res) => {
 
     const { insertId } = await run(
       `INSERT INTO clients
-        (name, address_line1, address_line2, po_dated, state, district, telephone, email, cgst, sgst)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (name, address_line1, address_line2, po_dated, state, district, telephone, email, gst_number, cgst, sgst, igst)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         String(name).trim(),
         address_line1 || null,
@@ -64,8 +66,10 @@ router.post('/', async (req, res) => {
         district || null,
         telephone || null,
         email || null,
+        gst_number || null,
         Number(cgst) || 0,
-        Number(sgst) || 0
+        Number(sgst) || 0,
+        Number(igst) || 0
       ]
     );
 
@@ -135,14 +139,16 @@ router.put('/:id', async (req, res) => {
       district = current.district,
       telephone = current.telephone,
       email = current.email,
+      gst_number = current.gst_number,
       cgst = current.cgst,
-      sgst = current.sgst
+      sgst = current.sgst,
+      igst = current.igst
     } = req.body || {};
 
     await run(
       `UPDATE clients
          SET name = ?, address_line1 = ?, address_line2 = ?, po_dated = ?,
-             state = ?, district = ?, telephone = ?, email = ?, cgst = ?, sgst = ?
+             state = ?, district = ?, telephone = ?, email = ?, gst_number = ?, cgst = ?, sgst = ?, igst = ?
        WHERE id = ?`,
       [
         String(name).trim(),
@@ -153,8 +159,10 @@ router.put('/:id', async (req, res) => {
         district || null,
         telephone || null,
         email || null,
+        gst_number || null,
         Number(cgst) || 0,
         Number(sgst) || 0,
+        number(igst) || 0,
         id
       ]
     );

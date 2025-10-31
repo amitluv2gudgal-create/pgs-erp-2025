@@ -78,14 +78,17 @@ async function showEmployeeForm() {
       <input type="number" placeholder="Salary per Month" id="salary_per_month" min="0" step="1"><br>
 
       <select id="category">
-        <option value="security guard">security guard</option>
-        <option value="lady searcher">lady searcher</option>
-        <option value="security supervisor">security supervisor</option>
-        <option value="assistant security officer">assistant security officer</option>
+        <option value="security guard">Security Guard</option>
+        <option value="lady searcher">Lady Searcher</option>
+        <option value="security supervisor">Security Supervisor</option>
+        <option value="assistant security officer">Assistant Security Officer</option>
         <option value="security officer">security officer</option>
-        <option value="unskilled workman">unskilled workman</option>
-        <option value="skilled workman">skilled workman</option>
-        <option value="work supervisor">work supervisor</option>
+        <option value="unskilled workman">Unskilled Workman</option>
+        <option value="skilled workman">Skilled Workman</option>
+        <option value="work supervisor">Work Supervisor</option>
+        <option value="cctv operator">CCTV Operator</option>
+        <option value="office boy">Office Boy</option>
+        <option value="steward">Steward</option>
       </select><br>
 
       <!-- Client dropdown replaces plain number input -->
