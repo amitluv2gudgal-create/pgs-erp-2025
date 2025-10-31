@@ -16,16 +16,27 @@ async function fetchClientsList() {
 
 
 /** Fetch employees list (used by tables) */
+// public/js/employees.js
 export const loadEmployees = async () => {
   try {
-    const res = await fetch('/api/employees');
-    if (!res.ok) throw new Error(await res.text());
+    // include cookies so session on server authorizes the request
+    const res = await fetch('/api/employees', { credentials: 'include' });
+    if (!res.ok) {
+      // If 401 — redirect to login
+      if (res.status === 401 || res.status === 403) {
+        console.warn('Not authenticated, redirecting to login');
+        window.location.href = '/login.html';
+        return [];
+      }
+      throw new Error(await res.text());
+    }
     return await res.json();
   } catch (err) {
     console.error('loadEmployees error:', err);
     return [];
   }
 };
+
 
 /** Render Create Employee form (single visible form, with Client dropdown) */
 async function showEmployeeForm() {
