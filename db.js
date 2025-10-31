@@ -1,60 +1,65 @@
 // db.js
+// ES module, robust sqlite initialization with safe fallback for Render
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
 import fs from 'fs';
 
-const DB_PATH = process.env.DB_PATH || path.join(process.cwd(), 'data', 'database.db');
+// Exported DB path (will be assigned to resolved path)
+export let DB_PATH = process.env.DB_PATH || path.join(process.cwd(), 'data', 'database.db');
 
 let db = null;
 
+/**
+ * Resolve a safe DB path:
+ * - prefer process.env.DB_PATH if inside project root
+ * - otherwise fall back to ./data/database.db inside project root
+ * - ensure directory exists
+ */
+function resolveDbPath() {
+  const projectRoot = process.cwd(); // e.g. /opt/render/project/src on Render
+  const requested = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : path.join(projectRoot, 'data', 'database.db');
+  let resolved = requested;
 
-// --- Robust directory creation for DB_PATH (replace existing mkdir block) ---
-const path = require('path');
-const fs = require('fs');
-
-let resolvedDBPath = DB_PATH || path.join(process.cwd(), 'data', 'database.db');
-let dbDir = path.dirname(resolvedDBPath);
-
-// If DB_PATH points outside the project root (e.g. "/data/..."), prefer an in-project fallback
-const projectRoot = process.cwd(); // usually /opt/render/project/src on Render
-if (!dbDir.startsWith(projectRoot)) {
-  // fallback to in-repo data directory
-  resolvedDBPath = path.join(projectRoot, 'data', 'database.db');
-  dbDir = path.dirname(resolvedDBPath);
-  console.warn(`[db] DB_PATH pointed outside project; falling back to ${resolvedDBPath}`);
-}
-
-try {
-  if (!fs.existsSync(dbDir)) {
-    fs.mkdirSync(dbDir, { recursive: true });
+  // If requested path is outside project root, fallback to project data folder
+  if (!resolved.startsWith(projectRoot)) {
+    resolved = path.join(projectRoot, 'data', 'database.db');
+    console.warn('[db] DB_PATH pointed outside project root; falling back to in-project DB at', resolved);
   }
-} catch (err) {
-  // If we still can't make the directory, set to in-project data (best-effort)
-  console.error('[db] Failed to create DB directory:', dbDir, err && err.message ? err.message : err);
-  // final fallback to project data folder
-  resolvedDBPath = path.join(projectRoot, 'data', 'database.db');
-  dbDir = path.dirname(resolvedDBPath);
+
+  // Ensure directory exists; try to create if missing
+  const dir = path.dirname(resolved);
   try {
-    if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
-  } catch (err2) {
-    console.error('[db] Final fallback failed to create project data dir:', err2 && err2.message ? err2.message : err2);
-    // Let initDB fail later with a clear message rather than trying to create root-owned directories
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+      console.log('[db] Created DB directory:', dir);
+    }
+  } catch (err) {
+    console.error('[db] Could not create DB directory:', dir, err && err.message ? err.message : err);
+    // Final fallback to project data folder if creation failed
+    const fallback = path.join(projectRoot, 'data', 'database.db');
+    try {
+      if (!fs.existsSync(path.dirname(fallback))) fs.mkdirSync(path.dirname(fallback), { recursive: true });
+      resolved = fallback;
+      console.warn('[db] Falling back to', resolved);
+    } catch (err2) {
+      console.error('[db] Final fallback failed:', err2 && err2.message ? err2.message : err2);
+      // Let caller handle the error when attempting to open DB
+    }
   }
-}
 
-// Finally use resolvedDBPath for opening DB
-console.log('[db] using DB file:', resolvedDBPath);
+  return resolved;
+}
 
 /**
- * Initialize database (creates / migrates tables).
- * Exported as initDB to match server.js import.
+ * Initialize DB: open connection, create tables, run safe migrations.
+ * Exported as initDB (uppercase D) to match server.js import.
  */
 export async function initDB() {
   try {
-    // Ensure folder exists
-    const dir = path.dirname(DB_PATH);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    // Determine safe path and assign exported DB_PATH
+    const resolved = resolveDbPath();
+    DB_PATH = resolved;
 
     db = await open({
       filename: DB_PATH,
@@ -63,7 +68,7 @@ export async function initDB() {
 
     console.log('[db] opened at', DB_PATH);
 
-    // Create core tables (fixed SQL)
+    // Core table creations (idempotent)
     await db.exec(`CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE,
@@ -130,9 +135,7 @@ export async function initDB() {
       submitted_by INTEGER,
       client_id INTEGER,
       status TEXT DEFAULT 'pending',
-      FOREIGN KEY(employee_id) REFERENCES employees(id),
-      FOREIGN KEY(submitted_by) REFERENCES security_supervisors(id),
-      FOREIGN KEY(client_id) REFERENCES clients(id)
+      FOREIGN KEY(employee_id) REFERENCES employees(id)
     );`);
 
     await db.exec(`CREATE TABLE IF NOT EXISTS deductions (
@@ -182,6 +185,7 @@ export async function initDB() {
       data TEXT,
       new_data TEXT,
       status TEXT DEFAULT 'pending',
+      approver_id INTEGER,
       FOREIGN KEY(requester_id) REFERENCES users(id)
     );`);
 
@@ -197,30 +201,27 @@ export async function initDB() {
       FOREIGN KEY(created_by) REFERENCES users(id)
     );`);
 
-    // perform safe migrations (add missing columns) — idempotent
+    // Safe migrations: add missing columns if needed
     await ensureClientExtraFields();
-    await ensureRequestsApproverColumn(); // placeholder (no-op if not needed)
-    await dropLegacyClientAddressColumn(); // placeholder (no-op if not needed)
+    await ensureRequestsApproverColumn();
+    await dropLegacyClientAddressColumn();
 
     console.log('[db] initialization completed');
     return db;
   } catch (err) {
-    console.error('[db] initDB failed:', err);
+    console.error('[db] initDB failed:', err && err.message ? err.message : err);
     throw err;
   }
 }
 
 /**
- * Migration helpers (safe; idempotent).
- * - ensureClientExtraFields adds gst_number and igst if missing.
- * - ensureRequestsApproverColumn and dropLegacyClientAddressColumn are kept to match server import statements (attempt safe actions or no-op).
+ * Migration helpers (idempotent)
  */
-
 export async function ensureClientExtraFields() {
   if (!db) throw new Error('DB not initialized');
   try {
     const rows = await db.all("PRAGMA table_info(clients);");
-    const colNames = rows.map(r => r.name);
+    const colNames = Array.isArray(rows) ? rows.map(r => r.name) : [];
     if (!colNames.includes('gst_number')) {
       console.log('[db] Adding gst_number column to clients');
       await db.exec("ALTER TABLE clients ADD COLUMN gst_number TEXT;");
@@ -234,8 +235,7 @@ export async function ensureClientExtraFields() {
       console.log('[db] clients.igst exists');
     }
   } catch (err) {
-    // If ALTER TABLE fails in some environments, log and rethrow
-    console.error('[db] ensureClientExtraFields error:', err);
+    console.error('[db] ensureClientExtraFields error:', err && err.message ? err.message : err);
     throw err;
   }
 }
@@ -243,44 +243,47 @@ export async function ensureClientExtraFields() {
 export async function ensureRequestsApproverColumn() {
   if (!db) throw new Error('DB not initialized');
   try {
-    // If you want an approver column on requests in future, add here safely.
     const rows = await db.all("PRAGMA table_info(requests);");
-    const colNames = rows.map(r => r.name);
+    const colNames = Array.isArray(rows) ? rows.map(r => r.name) : [];
     if (!colNames.includes('approver_id')) {
-      console.log('[db] Adding approver_id to requests (if needed)');
-      // add as nullable so existing rows are fine
+      console.log('[db] Adding approver_id to requests');
       await db.exec("ALTER TABLE requests ADD COLUMN approver_id INTEGER;");
     } else {
       console.log('[db] requests.approver_id exists');
     }
   } catch (err) {
-    // tolerate failures (some older DBs may not need this)
-    console.warn('[db] ensureRequestsApproverColumn warning:', err.message || err);
+    // tolerate and log
+    console.warn('[db] ensureRequestsApproverColumn warning:', err && err.message ? err.message : err);
   }
 }
 
 export async function dropLegacyClientAddressColumn() {
-  // Some older DBs may have an old column named "address" and you might want to drop it.
-  // SQLite does not support DROP COLUMN directly in older versions — implementing safely would require table rebuild.
-  // For now, we just log and leave the column intact. If you want to remove it, implement backup+recreate logic here.
+  // No-op placeholder to match server import; dropping columns in SQLite requires table rebuild.
   console.log('[db] dropLegacyClientAddressColumn: no-op (preserving legacy address column)');
-  return;
 }
 
-// Basic query/run wrappers (exported so controllers can import)
+/**
+ * Simple query/run wrappers (export to controllers)
+ */
 export const query = async (sql, params = []) => {
   if (!db) throw new Error('DB not initialized');
   return db.all(sql, params);
 };
+
 export const run = async (sql, params = []) => {
   if (!db) throw new Error('DB not initialized');
-  // sqlite `run` returns a Statement result with lastID / changes when using node-sqlite3 wrapper via open()
   return db.run(sql, params);
 };
 
-// Provide compatibility exports expected by server.js
-export const dbModule = { initDB, ensureClientExtraFields, ensureRequestsApproverColumn, dropLegacyClientAddressColumn, query, run };
-export { DB_PATH };
+// Provide a dbModule object and named exports expected by server.js
+export const dbModule = {
+  initDB,
+  ensureClientExtraFields,
+  ensureRequestsApproverColumn,
+  dropLegacyClientAddressColumn,
+  query,
+  run
+};
 
 // Default export for backward compatibility
 export default {
