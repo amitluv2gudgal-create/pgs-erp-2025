@@ -8,6 +8,44 @@ const DB_PATH = process.env.DB_PATH || path.join(process.cwd(), 'data', 'databas
 
 let db = null;
 
+
+// --- Robust directory creation for DB_PATH (replace existing mkdir block) ---
+const path = require('path');
+const fs = require('fs');
+
+let resolvedDBPath = DB_PATH || path.join(process.cwd(), 'data', 'database.db');
+let dbDir = path.dirname(resolvedDBPath);
+
+// If DB_PATH points outside the project root (e.g. "/data/..."), prefer an in-project fallback
+const projectRoot = process.cwd(); // usually /opt/render/project/src on Render
+if (!dbDir.startsWith(projectRoot)) {
+  // fallback to in-repo data directory
+  resolvedDBPath = path.join(projectRoot, 'data', 'database.db');
+  dbDir = path.dirname(resolvedDBPath);
+  console.warn(`[db] DB_PATH pointed outside project; falling back to ${resolvedDBPath}`);
+}
+
+try {
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
+} catch (err) {
+  // If we still can't make the directory, set to in-project data (best-effort)
+  console.error('[db] Failed to create DB directory:', dbDir, err && err.message ? err.message : err);
+  // final fallback to project data folder
+  resolvedDBPath = path.join(projectRoot, 'data', 'database.db');
+  dbDir = path.dirname(resolvedDBPath);
+  try {
+    if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
+  } catch (err2) {
+    console.error('[db] Final fallback failed to create project data dir:', err2 && err2.message ? err2.message : err2);
+    // Let initDB fail later with a clear message rather than trying to create root-owned directories
+  }
+}
+
+// Finally use resolvedDBPath for opening DB
+console.log('[db] using DB file:', resolvedDBPath);
+
 /**
  * Initialize database (creates / migrates tables).
  * Exported as initDB to match server.js import.
