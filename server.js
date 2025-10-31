@@ -3,7 +3,9 @@ import express from 'express';
 import session from 'express-session';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
-import { dropLegacyClientAddressColumn, ensureRequestsApproverColumn, ensureClientExtraFields, initDB, DB_PATH } from './db.js';
+
+// import the functions we implemented in db.js
+import { dropLegacyClientAddressColumn, ensureRequestsApproverColumn, ensureClientExtraFields, initDB, dbModule, DB_PATH } from './db.js';
 
 // Route modules (pure routers — must NOT touch DB at import time)
 import authRoutes from './controllers/auth.js';
@@ -40,13 +42,12 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-   httpOnly: true,                 // not readable by JS
-   sameSite: 'lax',                // works across normal GET navigations
-   secure: process.env.NODE_ENV === 'production', // set on HTTPS
-   maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
- }
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: NODE_ENV === 'production',
+    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+  }
 }));
-
 
 // Only protect /api; allow /api/auth/login and /api/auth/current-user
 const requireAuth = (req, res, next) => {
@@ -56,37 +57,42 @@ const requireAuth = (req, res, next) => {
 };
 
 async function bootstrap() {
-  // 1) Initialize DB (creates tables + seeds admin)
-  await initDB();
-  console.log('[db] Ready at:', DB_PATH);
+  try {
+    // 1) Initialize DB (creates tables + seeds admin)
+    await initDB();
+    console.log('[db] Ready at:', DB_PATH);
 
-  ensureClientExtraFields().catch(err => console.error('Client fields migration failed:', err));
-  await dropLegacyClientAddressColumn();
-  await ensureRequestsApproverColumn(); 
-  // 2) Register middleware AFTER DB is ready
-  app.use('/api', requireAuth);
+    // run migrations / extra steps (they are idempotent)
+    await ensureRequestsApproverColumn().catch(err => console.error('ensureRequestsApproverColumn failed:', err));
+    await ensureClientExtraFields().catch(err => console.error('ensureClientExtraFields failed:', err));
+    await dropLegacyClientAddressColumn().catch(err => console.error('dropLegacyClientAddressColumn failed:', err));
 
-  // 3) Register routes (routers must not run queries at import time)
-  app.use('/api/auth', authRoutes);
-  app.use('/api/clients', clientRoutes);
-  app.use('/api/employees', employeeRoutes);
-  app.use('/api/attendances', attendanceRoutes);
-  app.use('/api/deductions', deductionRoutes);
-  app.use('/api/invoices', invoiceRoutes);
-  app.use('/api/salaries', salaryRoutes);
-  app.use('/api/requests', requestRoutes);
-  app.use('/api/security-supervisors', securitySupervisorRoutes);
+    // 2) Register middleware AFTER DB is ready
+    app.use('/api', requireAuth);
 
-  // 4) Basic pages
-  app.get('/', (req, res) => res.redirect('/login.html'));
-  app.get('/favicon.ico', (req, res) => res.status(204).end());
+    // 3) Register routes (routers must not run queries at import time)
+    app.use('/api/auth', authRoutes);
+    app.use('/api/clients', clientRoutes);
+    app.use('/api/employees', employeeRoutes);
+    app.use('/api/attendances', attendanceRoutes);
+    app.use('/api/deductions', deductionRoutes);
+    app.use('/api/invoices', invoiceRoutes);
+    app.use('/api/salaries', salaryRoutes);
+    app.use('/api/requests', requestRoutes);
+    app.use('/api/security-supervisors', securitySupervisorRoutes);
 
-  app.listen(PORT, () => {
-    console.log('Server running on port', PORT);
-  });
+    // 4) Basic pages
+    app.get('/', (req, res) => res.redirect('/login.html'));
+    app.get('/favicon.ico', (req, res) => res.status(204).end());
+
+    // start server
+    app.listen(PORT, () => {
+      console.log(`PGS-ERP running on http://localhost:${PORT}`);
+    });
+  } catch (err) {
+    console.error('Fatal startup error:', err);
+    process.exit(1);
+  }
 }
 
-bootstrap().catch((err) => {
-  console.error('Fatal startup error:', err);
-  process.exit(1);
-});
+bootstrap();
