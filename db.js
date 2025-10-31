@@ -110,6 +110,31 @@ export async function initDB() {
     month TEXT,
     FOREIGN KEY(employee_id) REFERENCES employees(id)
   )`);
+  // db.js — add inside your DB initialization function after opening DB
+async function ensureDeductionNoteColumn(db) {
+  try {
+    const row = await new Promise((resolve, reject) => {
+      db.all("PRAGMA table_info(deductions);", (err, rows) => err ? reject(err) : resolve(rows));
+    });
+
+    const hasNote = Array.isArray(row) && row.some(r => r.name === 'note');
+    if (!hasNote) {
+      console.log('[db] Adding note column to deductions table');
+      await new Promise((resolve, reject) => {
+        db.run("ALTER TABLE deductions ADD COLUMN note TEXT;", (err) => err ? reject(err) : resolve());
+      });
+    } else {
+      console.log('[db] deductions.note column exists');
+    }
+  } catch (err) {
+    console.error('[db] ensureDeductionNoteColumn error:', err);
+  }
+}
+
+// Call ensureDeductionNoteColumn(db) during bootstrap after DB is ready
+// Example: (assuming you have `db` handle)
+ensureDeductionNoteColumn(db).catch(console.error);
+
 
   await db.run(`CREATE TABLE IF NOT EXISTS invoices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

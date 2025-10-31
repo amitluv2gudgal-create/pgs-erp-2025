@@ -7,95 +7,84 @@ const router = express.Router();
 // GET all deductions with employee name
 router.get('/', async (req, res) => {
   try {
-    const deductions = await query(`
-      SELECT d.*, e.name as employee_name 
-      FROM deductions d 
-      LEFT JOIN employees e ON d.employee_id = e.id
-      ORDER BY d.date DESC
-    `);
-    console.log('Fetched deductions with names:', deductions.length);  // Debug log
-    res.json(deductions);
+    // Return common join to include employee name (if you already do that adjust accordingly)
+    const rows = await dbQuery(`SELECT d.id, d.employee_id, d.amount, d.reason, d.date, d.month, d.note,
+                                      e.name AS employee_name
+                               FROM deductions d
+                               LEFT JOIN employees e ON e.id = d.employee_id
+                               ORDER BY d.id DESC`);
+    res.json(rows);
   } catch (err) {
-    console.error('Error fetching deductions:', err);
+    console.error('GET /api/deductions error', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST for creating deduction (unchanged)
-router.post('/', async (req, res) => {
-  const { employee_id, month, amount, reason } = req.body;
-  try {
-    if (!employee_id || isNaN(employee_id) || !month || !amount || !reason) {
-      throw new Error('Missing or invalid parameters: employee_id, month, amount, and reason are required');
-    }
-
-    // Save deduction to database
-    await run(
-      'INSERT INTO deductions (employee_id, month, amount, reason) VALUES (?, ?, ?, ?)',
-      [employee_id, month, amount, reason]
-    );
-    res.json({ message: 'Deduction created successfully' });
-  } catch (err) {
-    console.error('Error creating deduction:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-export async function loadDeductions() {
-  try {
-    const deductions = await query('SELECT d.*, e.name AS employee_name FROM deductions d LEFT JOIN employees e ON d.employee_id = e.id');
-    return deductions.map(d => ({
-      ...d,
-      employee_name: d.employee_name || 'Unknown'
-    }));
-  } catch (err) {
-    console.error('Error fetching deductions:', err);
-    throw err;
-  }
-}
-
-// ==== GET one deduction by ID ====
+// Get single deduction
 router.get('/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
-    const rows = await query('SELECT * FROM deductions WHERE id = ?', [id]);
-    if (!rows.length) return res.status(404).json({ error: 'Deduction not found' });
+    const rows = await dbQuery('SELECT * FROM deductions WHERE id = ?', [id]);
+    if (!rows || rows.length === 0) return res.status(404).json({ error: 'Not found' });
     res.json(rows[0]);
   } catch (err) {
-    console.error('GET /deductions/:id error:', err);
-    res.status(500).json({ error: 'Server error' });
+    console.error('GET /api/deductions/:id error', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ==== UPDATE one deduction (PUT) ====
+// Create deduction
+router.post('/', async (req, res) => {
+  try {
+    const { employee_id, month, reason, amount, note } = req.body;
+
+    // Basic validation (adjust role check if required)
+    if (!employee_id || !month || !reason || !(amount > 0)) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const dateNow = new Date().toISOString();
+    const result = await dbRun(
+      `INSERT INTO deductions (employee_id, amount, reason, date, month, note)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [employee_id, amount, reason, dateNow, month, note ?? null]
+    );
+
+    // result.lastID depends on your db wrapper; adjust accordingly
+    const insertedId = result?.lastID ?? null;
+    res.status(201).json({ ok: true, id: insertedId });
+  } catch (err) {
+    console.error('POST /api/deductions error', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update deduction
 router.put('/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const { employee_id, amount, reason, date, month, note } = req.body;
 
-    const rows = await query('SELECT * FROM deductions WHERE id = ?', [id]);
-    if (!rows.length) return res.status(404).json({ error: 'Deduction not found' });
-    const current = rows[0];
-
-    const {
-      employee_id = current.employee_id,
-      amount = current.amount,
-      reason = current.reason,
-      date = current.date,
-      month = current.month
-    } = req.body || {};
-
-    await run(
-      `UPDATE deductions
-          SET employee_id = ?, amount = ?, reason = ?, date = ?, month = ?
-        WHERE id = ?`,
-      [employee_id, amount, reason, date, month, id]
+    await dbRun(
+      `UPDATE deductions SET employee_id = ?, amount = ?, reason = ?, date = ?, month = ?, note = ? WHERE id = ?`,
+      [employee_id, amount, reason, date || null, month || null, note ?? null, id]
     );
-    res.json({ ok: true, message: 'Deduction updated' });
+    res.json({ ok: true });
   } catch (err) {
-    console.error('PUT /deductions/:id error:', err);
-    res.status(500).json({ error: 'Server error' });
+    console.error('PUT /api/deductions/:id error', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete deduction (if you have it)
+router.delete('/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    await dbRun('DELETE FROM deductions WHERE id = ?', [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /api/deductions/:id error', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
