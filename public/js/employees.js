@@ -4,7 +4,7 @@
 // Safe local helper to avoid name clash with clients.js
 async function fetchClientsList() {
   try {
-    const r = await fetch('/api/clients');
+    const r = await fetch('/api/clients', { credentials: 'include' });
     if (!r.ok) throw new Error(await r.text());
     const list = await r.json();
     return Array.isArray(list) ? list : [];
@@ -14,28 +14,21 @@ async function fetchClientsList() {
   }
 }
 
-
-/** Fetch employees list (used by tables) */
-// public/js/employees.js
 export const loadEmployees = async () => {
   try {
-    // include cookies so session on server authorizes the request
     const res = await fetch('/api/employees', { credentials: 'include' });
     if (!res.ok) {
-      // If 401 — redirect to login
-      if (res.status === 401 || res.status === 403) {
-        console.warn('Not authenticated, redirecting to login');
-        window.location.href = '/login.html';
-        return [];
-      }
-      throw new Error(await res.text());
+      console.error('loadEmployees: server responded', res.status, await res.text());
+      return [];
     }
-    return await res.json();
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
   } catch (err) {
     console.error('loadEmployees error:', err);
     return [];
   }
 };
+
 
 
 /** Render Create Employee form (single visible form, with Client dropdown) */
@@ -236,7 +229,7 @@ import { loadClients } from './clients.js';
 window.openEditEmployee = async (id) => {
   try {
     const [rEmp, clients] = await Promise.all([
-  fetch(`/api/employees/${id}`),
+  fetch(`/api/employees/${id}`),  { credentials: 'include' },
   fetchClientsList()
 ]);
 
@@ -325,10 +318,11 @@ window.openEditEmployee = async (id) => {
       };
 
       try {
-        const u = await fetch(`/api/employees/${id}`, {
+        const u = await fetch(`/api/employees/${id}`,  {
           method: 'PUT',
+          credentials: 'include', 
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
         });
         if (!u.ok) throw new Error(await u.text());
         alert('Employee updated');
