@@ -43,6 +43,12 @@ router.post('/', async (req, res) => {
       epf_number, esic_number, criminal_record, salary_per_month, category, client_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       fields
     );
+    
+    // controllers/employees.js — in router.post('/')
+console.log('[employees] POST /api/employees attempt; session.user=', req.session?.user ? { id: req.session.user.id, role: req.session.user.role, username: req.session.user.username } : null);
+console.log('[employees] payload:', req.body);
+
+
     res.json({ id });
   } catch (err) {
     res.status(500).json({ error: err.message });

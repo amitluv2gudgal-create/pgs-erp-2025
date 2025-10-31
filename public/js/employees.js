@@ -154,16 +154,19 @@ async function showEmployeeForm() {
     }
 
     try {
-      const response = await fetch('/api/employees', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      });
+
+const response = await fetch('/api/employees', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  credentials: 'include',         // <<< add this
+  body: JSON.stringify(data)
+});
 
       if (!response.ok) {
-        const err = await tryText(response);
-        throw new Error(err || 'Failed to create employee');
-      }
+  const txt = await tryText(response);
+  throw new Error(`Status ${response.status}: ${txt || response.statusText}`);
+}
+
 
       alert('Employee created');
       // ✅ Clear the form after success
