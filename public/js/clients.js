@@ -8,7 +8,7 @@
 console.log('clients.js loaded'); // debug - confirms script is executing
 
 // --------- Load clients helper (exported for other modules if needed) ----------
-export const loadClients = async () => {
+async function loadClients() {
   try {
     const res = await fetch('/api/clients', { credentials: 'include' });
     if (!res.ok) {
@@ -21,7 +21,19 @@ export const loadClients = async () => {
     console.error('loadClients failed:', e);
     return [];
   }
-};
+}
+  try {
+    const res = await fetch('/api/clients', { credentials: 'include' });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => String(res.status));
+      throw new Error(`Failed to load clients: ${res.status} ${txt}`);
+    }
+    const json = await res.json();
+    return Array.isArray(json) ? json : [];
+  } catch (e) {
+    console.error('loadClients failed:', e);
+    return [];
+  }
 
 // ===== Create Client (form) =====
 window.showClientForm = () => {
