@@ -323,8 +323,6 @@ window.openEditClient = async (id) => {
   }
 };
 
-/* ======= Modal Create Form + Table Renderer Patch ======= */
-
 /* Create Client modal (does NOT replace dashboard DOM) */
 window.openCreateClientModal = () => {
   // Prevent multiple modals
@@ -338,7 +336,7 @@ window.openCreateClientModal = () => {
   card.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
       <h3 style="margin:0">Create Client</h3>
-      <button id="create-client-close" style="border:none;background:transparent;font-size:24px;cursor:pointer">&times;</button>
+      <button id="create-client-top-close" style="border:none;background:transparent;font-size:24px;cursor:pointer">&times;</button>
     </div>
     <form id="clEditForm_modal" style="display:grid;gap:10px;">
       <label>Name<br><input id="e_name" required></label>
@@ -364,9 +362,11 @@ window.openCreateClientModal = () => {
 
       <h4 style="margin:6px 0 0 0">Categories (optional)</h4>
       <div id="categoriesContainer_modal"></div>
+
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px;">
         <button type="button" id="addCategoryBtn_modal">Add Category</button>
         <button type="submit">Create Client</button>
+        <button type="button" id="create-client-close-btn">Close</button>
       </div>
       <div id="cl_edit_msg_modal" style="color:#b00;"></div>
     </form>
@@ -375,7 +375,11 @@ window.openCreateClientModal = () => {
   overlay.appendChild(card);
   document.body.appendChild(overlay);
 
-  document.getElementById('create-client-close').onclick = () => overlay.remove();
+  // top × close
+  document.getElementById('create-client-top-close').onclick = () => overlay.remove();
+  // Close button inside form
+  document.getElementById('create-client-close-btn').onclick = () => overlay.remove();
+
   document.getElementById('addCategoryBtn_modal').onclick = () => addCategoryFieldModal();
 
   // Add first category field
@@ -445,6 +449,7 @@ window.openCreateClientModal = () => {
   });
 };
 
+
 /* helper to add category line in the create modal */
 function addCategoryFieldModal(){
   const container = document.getElementById('categoriesContainer_modal');
@@ -484,35 +489,48 @@ window.renderClientsTable = (clients=[]) => {
   let container = document.getElementById('clients-table-container');
   if (!container) {
     const content = document.getElementById('content') || document.body;
+    // do not wipe entire content if it contains dashboard buttons — only create container if missing
     container = document.createElement('div');
     container.id = 'clients-table-container';
-    content.innerHTML = ''; // optional: clear only if you want. If you don't want to clear, comment this line.
     content.appendChild(container);
   }
 
   // Build table HTML (responsive horizontally)
-  let html = `<div style="overflow:auto"><table class="clients-table" border="1" cellpadding="6" style="border-collapse:collapse;width:100%;min-width:1100px">
+  let html = `<div style="overflow:auto"><table class="clients-table" border="1" cellpadding="6" style="border-collapse:collapse;width:100%;min-width:1200px">
     <thead style="background:#f2f2f2">
       <tr>
         <th>#</th>
         <th>Name</th>
-        <th>Address (Billed)</th>
-        <th>Address (Shipped)</th>
+        <th>Address Line 1 (Billed)</th>
+        <th>Address Line 2 (Shipped)</th>
         <th>PO/Dated</th>
         <th>State</th>
         <th>District</th>
+        <th>Contact Person</th>
         <th>Telephone</th>
         <th>Email</th>
         <th>GST</th>
         <th>IGST (%)</th>
         <th>CGST (%)</th>
         <th>SGST (%)</th>
+        <th>Categories</th>
         <th>Actions</th>
       </tr>
     </thead>
     <tbody>`;
 
   clients.forEach((c, idx) => {
+    // prepare categories text if backend returns categories array or string
+    let catText = '';
+    if (Array.isArray(c.categories)) {
+      catText = c.categories.map(cc => `${escapeHtml(cc.category)}: ₹${cc.monthly_rate ?? ''}`).join(', ');
+    } else if (typeof c.categories === 'string') {
+      catText = escapeHtml(c.categories);
+    } else if (c.categories && typeof c.categories === 'object') {
+      // maybe single object
+      catText = Object.entries(c.categories).map(([k,v])=>`${escapeHtml(k)}: ${escapeHtml(String(v))}`).join(', ');
+    }
+
     html += `<tr>
       <td>${idx+1}</td>
       <td>${escapeHtml(c.name)}</td>
@@ -521,14 +539,17 @@ window.renderClientsTable = (clients=[]) => {
       <td>${escapeHtml(c.po_dated || '')}</td>
       <td>${escapeHtml(c.state || '')}</td>
       <td>${escapeHtml(c.district || '')}</td>
+      <td>${escapeHtml(c.contact_person || '')}</td>
       <td>${escapeHtml(c.telephone || '')}</td>
       <td>${escapeHtml(c.email || '')}</td>
       <td>${escapeHtml(c.gst_number || '')}</td>
       <td>${c.igst ?? ''}</td>
       <td>${c.cgst ?? ''}</td>
       <td>${c.sgst ?? ''}</td>
+      <td>${escapeHtml(catText)}</td>
       <td>
         <button data-id="${c.id}" class="editClientBtn">Edit</button>
+        <button data-id="${c.id}" class="deleteClientBtn">Delete</button>
         <button data-id="${c.id}" class="addCatBtn">Add Category</button>
       </td>
     </tr>`;
@@ -545,6 +566,23 @@ window.renderClientsTable = (clients=[]) => {
       if (id) window.openEditClient(Number(id));
     };
   });
+  container.querySelectorAll('.deleteClientBtn').forEach(btn=>{
+    btn.onclick = async (e) => {
+      const id = e.currentTarget.getAttribute('data-id');
+      if (!id) return;
+      if (!confirm('Delete this client?')) return;
+      try {
+        const r = await fetch(`/api/clients/${id}`, { method: 'DELETE' });
+        if (!r.ok) throw new Error(await r.text());
+        alert('Deleted');
+        if (window.refreshClientsTable) window.refreshClientsTable();
+        else if (window.showTable) window.showTable('clients');
+      } catch (err) {
+        console.error('delete client error', err);
+        alert('Delete failed — see console');
+      }
+    };
+  });
   container.querySelectorAll('.addCatBtn').forEach(btn=>{
     btn.onclick = (e) => {
       const id = e.currentTarget.getAttribute('data-id');
@@ -552,6 +590,7 @@ window.renderClientsTable = (clients=[]) => {
     };
   });
 };
+
 
 /* small html escape helper used by renderer */
 function escapeHtml(s){
