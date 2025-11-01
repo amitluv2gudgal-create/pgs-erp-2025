@@ -1,12 +1,19 @@
 // public/js/clients.js
 // Frontend client management (Create + View)
-// Updated: fixed table header/data alignment, added GST/IGST in edit modal.
+// Updated to auto-load clients on DOMContentLoaded and provide load/render helpers.
+
+console.log('clients.js loaded'); // debug - confirms script is executing
 
 // Load clients helper
 export const loadClients = async () => {
   try {
     const res = await fetch('/api/clients', { credentials: 'include' });
-    return res.ok ? await res.json() : [];
+    if (!res.ok) {
+      const txt = await res.text().catch(()=>String(res.status));
+      throw new Error(`Failed to load clients: ${res.status} ${txt}`);
+    }
+    const json = await res.json();
+    return Array.isArray(json) ? json : [];
   } catch (e) {
     console.error('loadClients failed:', e);
     return [];
@@ -479,3 +486,27 @@ function escHtml(s) {
 // Compatibility shims for legacy inline onclicks (safe to keep alongside delegation)
 window.openEditClient = (id) => { try { openEditClientModal(Number(id)); } catch(e) { console.error(e); } };
 window.showCategoryForm = (id) => { try { openAddCategoryModal(Number(id)); } catch(e) { console.error(e); } };
+
+// --------- Auto-load clients on page load (if clients container present) ----------
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    // If there's a container for clients, fetch and render automatically
+    const clientsContainer = document.getElementById('table-container-clients');
+    if (!clientsContainer) return; // nothing to render here
+
+    // fetch clients
+    const rows = await loadClients();
+    window.data_clients = rows; // keep global reference for other code
+
+    // call renderTable (our override) to show clients
+    if (typeof window.renderTable === 'function') {
+      // params: containerId, tableName, data
+      window.renderTable('table-container-clients', 'clients', window.data_clients);
+      console.log('clients.js: rendered', window.data_clients?.length ?? 0, 'clients');
+    } else {
+      console.warn('clients.js: renderTable not defined');
+    }
+  } catch (err) {
+    console.error('clients.js auto-load error:', err);
+  }
+});
