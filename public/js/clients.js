@@ -483,15 +483,72 @@ function addCategoryFieldModal(){
   wrapper.querySelector('.removeCatBtn_modal').onclick = ()=>wrapper.remove();
 }
 
-/* ======= Render clients table with new columns ======= */
-window.renderClientsTable = (clients=[]) => {
+/* ======= Normalizing renderer for Clients table (replace existing renderClientsTable + escapeHtml) ======= */
+
+function escapeHtml(s){
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'",'&#39;');
+}
+
+/**
+ * Normalize a client object from whatever shape the backend returns
+ * into the fields used by the table renderer.
+ */
+function normalizeClient(c = {}) {
+  // copy shallow to avoid mutations
+  const o = Object.assign({}, c);
+
+  // Address mapping: prefer address_line1/address_line2, else fallback to address / address_1 / addr
+  o.address_line1 = o.address_line1 ?? o.address ?? o.addr ?? o.address1 ?? (o.address_full ? String(o.address_full).split('\n')[0] : '') ?? '';
+  o.address_line2 = o.address_line2 ?? o.address2 ?? o.addr2 ?? (o.address_full ? String(o.address_full).split('\n').slice(1).join(', ') : '') ?? '';
+
+  // Contact person mapping
+  o.contact_person = o.contact_person ?? o.contact ?? o.contact_name ?? o.person ?? o.manager ?? '';
+
+  // Telephone / phone mapping
+  o.telephone = o.telephone ?? o.phone ?? o.tel ?? o.mobile ?? o.contact_phone ?? '';
+
+  // email mapping
+  o.email = o.email ?? o.email_address ?? o.contact_email ?? '';
+
+  // GST fields
+  o.gst_number = o.gst_number ?? o.gst ?? o.gstin ?? '';
+  // Taxes - ensure numeric or empty
+  o.igst = (o.igst !== undefined && o.igst !== null && o.igst !== '') ? o.igst : (o.IGST !== undefined ? o.IGST : '');
+  o.cgst = (o.cgst !== undefined && o.cgst !== null && o.cgst !== '') ? o.cgst : (o.CGST !== undefined ? o.CGST : '');
+  o.sgst = (o.sgst !== undefined && o.sgst !== null && o.sgst !== '') ? o.sgst : (o.SGST !== undefined ? o.SGST : '');
+
+  // categories: ensure array if possible
+  if (Array.isArray(o.categories)) {
+    // ok
+  } else if (typeof o.categories === 'string' && o.categories.trim().length > 0) {
+    // maybe backend stores as comma-separated string like "security guard: ₹23024, security supervisor: ₹24738"
+    // We will leave as string and renderer will display it.
+  } else if (o.client_categories && Array.isArray(o.client_categories)) {
+    o.categories = o.client_categories;
+  } else {
+    o.categories = o.categories ?? [];
+  }
+
+  return o;
+}
+
+window.renderClientsTable = (clients = []) => {
+  // Normalize array safely
+  const normalized = (clients || []).map(normalizeClient);
+
   // find table container — try common IDs, otherwise create one in #content
   let container = document.getElementById('clients-table-container');
   if (!container) {
     const content = document.getElementById('content') || document.body;
-    // do not wipe entire content if it contains dashboard buttons — only create container if missing
     container = document.createElement('div');
     container.id = 'clients-table-container';
+    // don't clear whole content (keeps dashboard buttons intact)
     content.appendChild(container);
   }
 
@@ -519,16 +576,25 @@ window.renderClientsTable = (clients=[]) => {
     </thead>
     <tbody>`;
 
-  clients.forEach((c, idx) => {
+  normalized.forEach((c, idx) => {
     // prepare categories text if backend returns categories array or string
     let catText = '';
-    if (Array.isArray(c.categories)) {
-      catText = c.categories.map(cc => `${escapeHtml(cc.category)}: ₹${cc.monthly_rate ?? ''}`).join(', ');
-    } else if (typeof c.categories === 'string') {
+    if (Array.isArray(c.categories) && c.categories.length) {
+      // support either {category, monthly_rate} or simple strings
+      catText = c.categories.map(cc => {
+        if (!cc) return '';
+        if (typeof cc === 'string') return escapeHtml(cc);
+        if (typeof cc === 'object') {
+          const catName = cc.category ?? cc.name ?? Object.values(cc)[0] ?? '';
+          const mrate = cc.monthly_rate ?? cc.rate ?? cc.monthly ?? '';
+          return `${escapeHtml(String(catName))}${mrate ? `: ₹${escapeHtml(String(mrate))}` : ''}`;
+        }
+        return escapeHtml(String(cc));
+      }).filter(Boolean).join(', ');
+    } else if (typeof c.categories === 'string' && c.categories.trim()) {
       catText = escapeHtml(c.categories);
-    } else if (c.categories && typeof c.categories === 'object') {
-      // maybe single object
-      catText = Object.entries(c.categories).map(([k,v])=>`${escapeHtml(k)}: ${escapeHtml(String(v))}`).join(', ');
+    } else {
+      catText = '';
     }
 
     html += `<tr>
@@ -548,9 +614,9 @@ window.renderClientsTable = (clients=[]) => {
       <td>${c.sgst ?? ''}</td>
       <td>${escapeHtml(catText)}</td>
       <td>
-        <button data-id="${c.id}" class="editClientBtn">Edit</button>
-        <button data-id="${c.id}" class="deleteClientBtn">Delete</button>
-        <button data-id="${c.id}" class="addCatBtn">Add Category</button>
+        <button data-id="${escapeHtml(c.id)}" class="editClientBtn">Edit</button>
+        <button data-id="${escapeHtml(c.id)}" class="deleteClientBtn">Delete</button>
+        <button data-id="${escapeHtml(c.id)}" class="addCatBtn">Add Category</button>
       </td>
     </tr>`;
   });
@@ -591,41 +657,14 @@ window.renderClientsTable = (clients=[]) => {
   });
 };
 
-
-/* small html escape helper used by renderer */
-function escapeHtml(s){
-  if (s === null || s === undefined) return '';
-  return String(s)
-    .replaceAll('&','&amp;')
-    .replaceAll('<','&lt;')
-    .replaceAll('>','&gt;')
-    .replaceAll('"','&quot;')
-    .replaceAll("'",'&#39;');
-}
-
-/* ====== Hook into existing showTable('clients') if present ====== */
-if (window.showTable && !window._clients_showTable_hooked) {
-  window._clients_showTable_hooked = true;
-  // keep original
-  window._showTable_original = window.showTable;
-  window.showTable = async (name) => {
-    if (name === 'clients') {
-      try {
-        const clients = await loadClients();
-        window.renderClientsTable(clients);
-      } catch (e) {
-        console.error('Failed to load clients for table:', e);
-      }
-    } else {
-      return window._showTable_original(name);
-    }
-  };
-} else {
-  // no showTable present — provide a refresh function
+/* optional helper to call if you need: */
+if (!window.refreshClientsTable) {
   window.refreshClientsTable = async () => {
     try {
       const clients = await loadClients();
-      window.renderClientsTable(clients);
+      // in case backend returns object {data: [...]}
+      const arr = Array.isArray(clients) ? clients : (clients.data && Array.isArray(clients.data) ? clients.data : []);
+      window.renderClientsTable(arr);
     } catch (e) {
       console.error('refreshClientsTable error', e);
     }
