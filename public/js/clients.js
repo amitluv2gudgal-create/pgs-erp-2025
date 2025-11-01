@@ -1,8 +1,8 @@
 // public/js/clients.js
 // Frontend client management (Create + View)
-// Updated for Address Line 1, Address Line 2, PO/dated, and richer table rendering.
-// Clean version: no inline onclicks; uses event delegation.
+// Updated: fixed table header/data alignment, added GST/IGST in edit modal.
 
+// Load clients helper
 export const loadClients = async () => {
   try {
     const res = await fetch('/api/clients', { credentials: 'include' });
@@ -62,34 +62,33 @@ window.showClientForm = () => {
   `;
 
   const addCategoryField = () => {
-  const cats = document.getElementById('categoriesContainer');
-  const row = document.createElement('div');
-  row.className = 'cat-row';
-  row.style.margin = '6px 0';
-  row.innerHTML = `
-    <select class="cat-select">
-      <option value="">Select Category</option>
-      <option value="security guard">Security Guard</option>
-      <option value="lady sercher">Lady Sercher</option>
-      <option value="security supervisor">Security Supervisor</option>
-      <option value="assistant security officer">Assistant Security Officer</option>
-      <option value="security officer">Security Officer</option>
-      <option value="housekeeper">Housekeeper</option>
-      <option value="housekeeping supervisor">Housekeeping Supervisor</option>
-      <option value="team leader housekeeping">Team Leader Housekeeping</option>
-      <option value="workman unskilled">Workman Unskilled</option>
-      <option value="workman skilled">Workman Skilled</option>
-      <option value="bouncer">Bouncer</option>
-      <option value="gunman">Gunman</option>
-      <option value="cctv operator">CCTV Operator</option>
-      <option value="office boy">Office Boy</option>
-      <option value="steward">Steward</option> 
-    </select>
-    <input type="number" step="0.01" placeholder="Monthly Rate" class="cat-rate" style="width:160px;">
-  `;
-  cats.appendChild(row);
-};
-
+    const cats = document.getElementById('categoriesContainer');
+    const row = document.createElement('div');
+    row.className = 'cat-row';
+    row.style.margin = '6px 0';
+    row.innerHTML = `
+      <select class="cat-select">
+        <option value="">Select Category</option>
+        <option value="security guard">Security Guard</option>
+        <option value="lady sercher">Lady Sercher</option>
+        <option value="security supervisor">Security Supervisor</option>
+        <option value="assistant security officer">Assistant Security Officer</option>
+        <option value="security officer">Security Officer</option>
+        <option value="housekeeper">Housekeeper</option>
+        <option value="housekeeping supervisor">Housekeeping Supervisor</option>
+        <option value="team leader housekeeping">Team Leader Housekeeping</option>
+        <option value="workman unskilled">Workman Unskilled</option>
+        <option value="workman skilled">Workman Skilled</option>
+        <option value="bouncer">Bouncer</option>
+        <option value="gunman">Gunman</option>
+        <option value="cctv operator">CCTV Operator</option>
+        <option value="office boy">Office Boy</option>
+        <option value="steward">Steward</option> 
+      </select>
+      <input type="number" step="0.01" placeholder="Monthly Rate" class="cat-rate" style="width:160px;">
+    `;
+    cats.appendChild(row);
+  };
 
   document.getElementById('btnAddCat').onclick = addCategoryField;
   addCategoryField(); // start with one row by default
@@ -172,10 +171,12 @@ function __clientsTableHTML(rows = []) {
           <th style="text-align:left;">PO/dated</th>
           <th style="text-align:left;">State</th>
           <th style="text-align:left;">District</th>
-          <th style="text-align:left;">Telephone</</th>
+          <th style="text-align:left;">Telephone</th>
           <th style="text-align:left;">Email</th>
+          <th style="text-align:left;">GST Number</th>
           <th style="text-align:left;">CGST</th>
           <th style="text-align:left;">SGST</th>
+          <th style="text-align:left;">IGST</th>
           <th style="text-align:left;">Categories</th>
           <th style="text-align:left; width:160px;">Actions</th>
         </tr>
@@ -191,8 +192,8 @@ function __clientsTableHTML(rows = []) {
             <td>${esc(c.state || '')}</td>
             <td>${esc(c.district || '')}</td>
             <td>${esc(c.telephone || '')}</td>
-            <td>${esc(c.gst_number || '')}</td>
             <td>${esc(c.email || '')}</td>
+            <td>${esc(c.gst_number || '')}</td>
             <td>${esc(c.cgst ?? '')}</td>
             <td>${esc(c.sgst ?? '')}</td>
             <td>${esc(c.igst ?? '')}</td>
@@ -299,7 +300,7 @@ async function openEditClientModal(id) {
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:9999';
   const card = document.createElement('div');
-  card.style.cssText = 'background:#fff;min-width:420px;max-width:640px;padding:16px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2)';
+  card.style.cssText = 'background:#fff;min-width:420px;max-width:720px;padding:16px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2)';
   card.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
       <h3 style="margin:0;">Edit Client #${id}</h3>
@@ -317,6 +318,10 @@ async function openEditClientModal(id) {
       <div style="display:flex;gap:10px;">
         <label style="flex:1">Telephone<br><input id="e_tel" value="${escHtml(client.telephone || '')}"></label>
         <label style="flex:1">Email<br><input id="e_email" type="email" value="${escHtml(client.email || '')}"></label>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <label style="flex:1">GST Number<br><input id="e_gst" value="${escHtml(client.gst_number || '')}"></label>
+        <label style="flex:1">IGST (%)<br><input id="e_igst" type="number" step="0.01" value="${client.igst ?? ''}"></label>
       </div>
       <div style="display:flex;gap:10px;">
         <label style="flex:1">CGST (%)<br><input id="e_cgst" type="number" step="0.01" value="${client.cgst ?? ''}"></label>
@@ -468,9 +473,7 @@ function numOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 function escHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (m) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  }[m]));
+  return String(s ?? '').replace(/[&<>"']/g, (m) => ( { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m] ));
 }
 
 // Compatibility shims for legacy inline onclicks (safe to keep alongside delegation)
