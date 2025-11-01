@@ -1,9 +1,8 @@
-// public/js/clients.js
-// Fixed and cleaned Clients frontend (Create + View)
-// - corrects table markup and column alignment
-// - preserves legacy functions and integrates with existing showTable/filterTable
+// public/js/clients.js  (ES Module version)
+// Exports: loadClients (named)
+// Also registers compatibility globals so legacy code still works.
 
-export const loadClients = async () => {
+export async function loadClients() {
   try {
     const res = await fetch('/api/clients', { credentials: 'include' });
     if (!res.ok) {
@@ -19,15 +18,14 @@ export const loadClients = async () => {
     window.data_clients = [];
     return [];
   }
-};
+}
 
-// ===== Create Client (form) =====
-window.showClientForm = () => {
+/* ----------------------
+   Client Create / Form
+   ---------------------- */
+export function showClientForm() {
   const content = document.getElementById('content') || document.body;
-
-  // Remove old container if present to avoid duplicates
   document.getElementById('client-create-container')?.remove();
-
   const container = document.createElement('div');
   container.id = 'client-create-container';
   content.appendChild(container);
@@ -47,8 +45,8 @@ window.showClientForm = () => {
         </label>
       </fieldset><br>
 
-      <label>State<br><input type="text" id="c_state" placeholder="e.g., Maharashtra"></label><br><br>
-      <label>District<br><input type="text" id="c_district" placeholder="e.g., Thane"></label><br><br>
+      <label>State<br><input type="text" id="c_state"></label><br><br>
+      <label>District<br><input type="text" id="c_district"></label><br><br>
 
       <label>PO/dated<br>
         <input type="text" id="c_po_dated" placeholder="e.g., PGS/SECURITY/105 dated 30th October 2025">
@@ -100,7 +98,7 @@ window.showClientForm = () => {
   };
 
   document.getElementById('btnAddCat').onclick = addCategoryField;
-  addCategoryField(); // start with one row by default
+  addCategoryField();
 
   document.getElementById('clientForm').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -133,7 +131,6 @@ window.showClientForm = () => {
       if (!res.ok) throw new Error(await res.text());
       const created = await res.json();
 
-      // Optional categories
       const rows = [...document.querySelectorAll('#categoriesContainer .cat-row')];
       for (const r of rows) {
         const category = r.querySelector('.cat-select').value;
@@ -158,15 +155,15 @@ window.showClientForm = () => {
       alert('Error: ' + (err.message || 'Failed'));
     }
   });
-};
+}
 
-// ===== Enhanced Clients table (View Clients) =====
+/* ----------------------
+   Table rendering (clients)
+   ---------------------- */
 
-// Preserve any existing global renderers (from app.js) so other tables still work
 const __origRenderTable = window.renderTable;
 const __origFilterTable = window.filterTable;
 
-// Build HTML
 function __clientsTableHTML(rows = []) {
   const esc = (s) => (s == null ? '' : String(s));
   return `
@@ -218,7 +215,6 @@ function __clientsTableHTML(rows = []) {
   `;
 }
 
-// Filter logic for search box (works with your existing search UI)
 function __filterClientsData(data, query, exact) {
   const q = (query || '').trim();
   if (!q) return data || [];
@@ -242,7 +238,7 @@ function __filterClientsData(data, query, exact) {
   });
 }
 
-// Override renderTable ONLY for 'clients'
+// override renderTable for 'clients'
 window.renderTable = function(containerId, table, data, query) {
   if (table !== 'clients') {
     return __origRenderTable && __origRenderTable(containerId, table, data, query);
@@ -256,7 +252,6 @@ window.renderTable = function(containerId, table, data, query) {
   const searchVal = searchEl ? searchEl.value : (query || '');
   const exact = exactEl ? !!exactEl.checked : false;
 
-  // prefer passed data, fallback to window.data_clients
   const src = Array.isArray(data) ? data : (window.data_clients || []);
   const filtered = __filterClientsData(src, searchVal, exact);
 
@@ -267,7 +262,6 @@ window.renderTable = function(containerId, table, data, query) {
   slot.innerHTML = __clientsTableHTML(filtered);
   container.appendChild(slot);
 
-  // Event delegation for Edit and Add Category buttons
   slot.addEventListener('click', (ev) => {
     const tr = ev.target.closest('tr[data-id]');
     if (!tr) return;
@@ -284,7 +278,6 @@ window.renderTable = function(containerId, table, data, query) {
   });
 };
 
-// Override filterTable only for 'clients'
 window.filterTable = function(table) {
   if (table !== 'clients') {
     return __origFilterTable && __origFilterTable(table);
@@ -294,7 +287,9 @@ window.filterTable = function(table) {
   window.renderTable(containerId, table, data, '');
 };
 
-// ===== Modals =====
+/* ----------------------
+   Modals: Edit client & Add category
+   ---------------------- */
 async function openEditClientModal(id) {
   let client;
   try {
@@ -319,7 +314,7 @@ async function openEditClientModal(id) {
       <label>Name<br><input id="e_name" value="${escHtml(client.name)}" required></label>
       <label>Address Line 1 (Billed to)<br><input id="e_addr1" value="${escHtml(client.address_line1 || '')}"></label>
       <label>Address Line 2 (Shipped to)<br><input id="e_addr2" value="${escHtml(client.address_line2 || '')}"></label>
-      <label>PO/dated<br><input id="e_po" value="${escHtml(client.po_dated || '')}" placeholder="PGS/SECURITY/105 dated 30th October 2025"></label>
+      <label>PO/dated<br><input id="e_po" value="${escHtml(client.po_dated || '')}"></label>
       <div style="display:flex;gap:10px;">
         <label style="flex:1">State<br><input id="e_state" value="${escHtml(client.state || '')}"></label>
         <label style="flex:1">District<br><input id="e_district" value="${escHtml(client.district || '')}"></label>
@@ -460,7 +455,9 @@ function openAddCategoryModal(id) {
   });
 }
 
-// ===== Helpers =====
+/* ----------------------
+   Helpers
+   ---------------------- */
 function valOrNull(v, required = false) {
   const s = String(v ?? '').trim();
   if (required && s === '') return null;
@@ -479,9 +476,29 @@ function numOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 function escHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (m) => ( { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m] ));
+  return String(s ?? '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 }
+function esc(s) { return s == null ? '' : String(s); }
 
-// Compatibility shims for legacy inline onclicks (safe to keep alongside delegation)
+/* Compatibility shims */
 window.openEditClient = (id) => { try { openEditClientModal(Number(id)); } catch(e) { console.error(e); } };
 window.showCategoryForm = (id) => { try { openAddCategoryModal(Number(id)); } catch(e) { console.error(e); } };
+
+/* ------------------------------------------
+   Auto-load clients on module import (non-blocking)
+   - Populate window.data_clients
+   - Trigger showTable('clients') if available
+   ------------------------------------------ */
+loadClients().then(data => {
+  // ensure global var exists for other scripts
+  window.data_clients = data || [];
+  // if the page expects showTable to be called, trigger it
+  if (typeof window.showTable === 'function') {
+    try { window.showTable('clients'); } catch (e) { console.warn('showTable(client) failed:', e); }
+  } else {
+    // Also call renderTable fallback if template expects that
+    try { window.renderTable && window.renderTable(`table-container-clients`, 'clients', window.data_clients); } catch (e) { /* ignore */ }
+  }
+}).catch(e => {
+  console.error('clients module initial load failed:', e);
+});
