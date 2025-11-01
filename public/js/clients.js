@@ -1,39 +1,17 @@
 // public/js/clients.js
-// Robust client frontend (Create + View) for PGS-ERP
-// - preserves any existing renderTable / showTable functions from app.js
-// - intercepts showTable('clients') to ensure clients are fetched and rendered
-// - exposes window.showClientsNow() for direct calls
-// - keeps create/edit/category UX
+// Frontend client management (Create + View)
+// Updated for Address Line 1, Address Line 2, PO/dated, and richer table rendering.
+// Clean version: no inline onclicks; uses event delegation.
 
-console.log('clients.js loaded'); // debug - confirms script is executing
-
-// --------- Load clients helper (exported for other modules if needed) ----------
-async function loadClients() {
+export const loadClients = async () => {
   try {
     const res = await fetch('/api/clients', { credentials: 'include' });
-    if (!res.ok) {
-      const txt = await res.text().catch(() => String(res.status));
-      throw new Error(`Failed to load clients: ${res.status} ${txt}`);
-    }
-    const json = await res.json();
-    return Array.isArray(json) ? json : [];
+    return res.ok ? await res.json() : [];
   } catch (e) {
     console.error('loadClients failed:', e);
     return [];
   }
-}
-  try {
-    const res = await fetch('/api/clients', { credentials: 'include' });
-    if (!res.ok) {
-      const txt = await res.text().catch(() => String(res.status));
-      throw new Error(`Failed to load clients: ${res.status} ${txt}`);
-    }
-    const json = await res.json();
-    return Array.isArray(json) ? json : [];
-  } catch (e) {
-    console.error('loadClients failed:', e);
-    return [];
-  }
+};
 
 // ===== Create Client (form) =====
 window.showClientForm = () => {
@@ -84,33 +62,34 @@ window.showClientForm = () => {
   `;
 
   const addCategoryField = () => {
-    const cats = document.getElementById('categoriesContainer');
-    const row = document.createElement('div');
-    row.className = 'cat-row';
-    row.style.margin = '6px 0';
-    row.innerHTML = `
-      <select class="cat-select">
-        <option value="">Select Category</option>
-        <option value="security guard">Security Guard</option>
-        <option value="lady sercher">Lady Sercher</option>
-        <option value="security supervisor">Security Supervisor</option>
-        <option value="assistant security officer">Assistant Security Officer</option>
-        <option value="security officer">Security Officer</option>
-        <option value="housekeeper">Housekeeper</option>
-        <option value="housekeeping supervisor">Housekeeping Supervisor</option>
-        <option value="team leader housekeeping">Team Leader Housekeeping</option>
-        <option value="workman unskilled">Workman Unskilled</option>
-        <option value="workman skilled">Workman Skilled</option>
-        <option value="bouncer">Bouncer</option>
-        <option value="gunman">Gunman</option>
-        <option value="cctv operator">CCTV Operator</option>
-        <option value="office boy">Office Boy</option>
-        <option value="steward">Steward</option> 
-      </select>
-      <input type="number" step="0.01" placeholder="Monthly Rate" class="cat-rate" style="width:160px;">
-    `;
-    cats.appendChild(row);
-  };
+  const cats = document.getElementById('categoriesContainer');
+  const row = document.createElement('div');
+  row.className = 'cat-row';
+  row.style.margin = '6px 0';
+  row.innerHTML = `
+    <select class="cat-select">
+      <option value="">Select Category</option>
+      <option value="security guard">Security Guard</option>
+      <option value="lady sercher">Lady Sercher</option>
+      <option value="security supervisor">Security Supervisor</option>
+      <option value="assistant security officer">Assistant Security Officer</option>
+      <option value="security officer">Security Officer</option>
+      <option value="housekeeper">Housekeeper</option>
+      <option value="housekeeping supervisor">Housekeeping Supervisor</option>
+      <option value="team leader housekeeping">Team Leader Housekeeping</option>
+      <option value="workman unskilled">Workman Unskilled</option>
+      <option value="workman skilled">Workman Skilled</option>
+      <option value="bouncer">Bouncer</option>
+      <option value="gunman">Gunman</option>
+      <option value="cctv operator">CCTV Operator</option>
+      <option value="office boy">Office Boy</option>
+      <option value="steward">Steward</option> 
+    </select>
+    <input type="number" step="0.01" placeholder="Monthly Rate" class="cat-rate" style="width:160px;">
+  `;
+  cats.appendChild(row);
+};
+
 
   document.getElementById('btnAddCat').onclick = addCategoryField;
   addCategoryField(); // start with one row by default
@@ -165,9 +144,7 @@ window.showClientForm = () => {
       }
 
       alert('Client saved.');
-      // If any showTable or our helper exists, re-open the clients table
-      if (window.showClientsNow) await window.showClientsNow();
-      else if (window.showTable) window.showTable('clients');
+      if (window.showTable) window.showTable('clients');
     } catch (err) {
       console.error('Create client error:', err);
       alert('Error: ' + (err.message || 'Failed'));
@@ -180,9 +157,8 @@ window.showClientForm = () => {
 // Preserve any existing global renderers (from app.js) so other tables still work
 const __origRenderTable = window.renderTable;
 const __origFilterTable = window.filterTable;
-const __origShowTable = window.showTable; // preserve original showTable if present
 
-// Build HTML for clients table
+// Build HTML
 function __clientsTableHTML(rows = []) {
   const esc = (s) => (s == null ? '' : String(s));
   return `
@@ -196,12 +172,10 @@ function __clientsTableHTML(rows = []) {
           <th style="text-align:left;">PO/dated</th>
           <th style="text-align:left;">State</th>
           <th style="text-align:left;">District</th>
-          <th style="text-align:left;">Telephone</th>
+          <th style="text-align:left;">Telephone</</th>
           <th style="text-align:left;">Email</th>
-          <th style="text-align:left;">GST Number</th>
           <th style="text-align:left;">CGST</th>
           <th style="text-align:left;">SGST</th>
-          <th style="text-align:left;">IGST</th>
           <th style="text-align:left;">Categories</th>
           <th style="text-align:left; width:160px;">Actions</th>
         </tr>
@@ -217,8 +191,8 @@ function __clientsTableHTML(rows = []) {
             <td>${esc(c.state || '')}</td>
             <td>${esc(c.district || '')}</td>
             <td>${esc(c.telephone || '')}</td>
-            <td>${esc(c.email || '')}</td>
             <td>${esc(c.gst_number || '')}</td>
+            <td>${esc(c.email || '')}</td>
             <td>${esc(c.cgst ?? '')}</td>
             <td>${esc(c.sgst ?? '')}</td>
             <td>${esc(c.igst ?? '')}</td>
@@ -309,48 +283,6 @@ window.filterTable = function(table) {
   window.renderTable(containerId, table, data, '');
 };
 
-// --------- If other code calls showTable('clients'), intercept it so we fetch & render ---------
-window.showClientsNow = async () => {
-  try {
-    const containerId = 'table-container-clients';
-    // ensure container exists (some apps create it on the fly)
-    if (!document.getElementById(containerId)) {
-      // try to find a generic container; if none, do nothing
-      console.warn('showClientsNow: container not present:', containerId);
-    }
-
-    const rows = await loadClients();
-    window.data_clients = rows;
-    // call our renderTable (which will render when table === 'clients')
-    window.renderTable(containerId, 'clients', window.data_clients);
-    console.log('clients.js: showClientsNow rendered', rows?.length ?? 0);
-  } catch (err) {
-    console.error('showClientsNow error:', err);
-  }
-};
-
-// wrap/override showTable if possible so calls showTable('clients') trigger fetch+render
-window.showTable = function(table, ...rest) {
-  try {
-    if (table === 'clients') {
-      // If an original showTable exists and expects a container name, prefer calling our helper
-      return window.showClientsNow();
-    }
-    // non-clients -> pass to original if present
-    if (typeof __origShowTable === 'function') {
-      return __origShowTable.call(window, table, ...rest);
-    }
-    // fallback: if original not present, but an earlier renderTable exists, call it
-    if (typeof __origRenderTable === 'function') {
-      const containerId = `table-container-${table}`;
-      return __origRenderTable(containerId, table, window[`data_${table}`] || []);
-    }
-    console.warn('showTable: no original showTable/renderTable to call for', table);
-  } catch (e) {
-    console.error('showTable wrapper error:', e);
-  }
-};
-
 // ===== Modals =====
 async function openEditClientModal(id) {
   // Load current client
@@ -367,7 +299,7 @@ async function openEditClientModal(id) {
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:9999';
   const card = document.createElement('div');
-  card.style.cssText = 'background:#fff;min-width:420px;max-width:720px;padding:16px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2)';
+  card.style.cssText = 'background:#fff;min-width:420px;max-width:640px;padding:16px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2)';
   card.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
       <h3 style="margin:0;">Edit Client #${id}</h3>
@@ -385,10 +317,6 @@ async function openEditClientModal(id) {
       <div style="display:flex;gap:10px;">
         <label style="flex:1">Telephone<br><input id="e_tel" value="${escHtml(client.telephone || '')}"></label>
         <label style="flex:1">Email<br><input id="e_email" type="email" value="${escHtml(client.email || '')}"></label>
-      </div>
-      <div style="display:flex;gap:10px;">
-        <label style="flex:1">GST Number<br><input id="e_gst" value="${escHtml(client.gst_number || '')}"></label>
-        <label style="flex:1">IGST (%)<br><input id="e_igst" type="number" step="0.01" value="${client.igst ?? ''}"></label>
       </div>
       <div style="display:flex;gap:10px;">
         <label style="flex:1">CGST (%)<br><input id="e_cgst" type="number" step="0.01" value="${client.cgst ?? ''}"></label>
@@ -438,8 +366,7 @@ async function openEditClientModal(id) {
       if (!r.ok) throw new Error(await r.text());
       close();
       alert('Client updated.');
-      if (window.showClientsNow) await window.showClientsNow();
-      else if (window.showTable) window.showTable('clients');
+      if (window.showTable) window.showTable('clients');
     } catch (err) {
       card.querySelector('#cl_edit_msg').textContent = err.message || 'Update failed.';
     }
@@ -515,8 +442,7 @@ function openAddCategoryModal(id) {
       if (!r.ok) throw new Error(await r.text());
       close();
       alert('Category added.');
-      if (window.showClientsNow) await window.showClientsNow();
-      else if (window.showTable) window.showTable('clients');
+      if (window.showTable) window.showTable('clients');
     } catch (err) {
       card.querySelector('#cat_msg').textContent = err.message || 'Failed to add category.';
     }
@@ -542,33 +468,11 @@ function numOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 function escHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (m) => ( { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m] ));
+  return String(s ?? '').replace(/[&<>"']/g, (m) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[m]));
 }
 
 // Compatibility shims for legacy inline onclicks (safe to keep alongside delegation)
 window.openEditClient = (id) => { try { openEditClientModal(Number(id)); } catch(e) { console.error(e); } };
 window.showCategoryForm = (id) => { try { openAddCategoryModal(Number(id)); } catch(e) { console.error(e); } };
-
-// --------- Auto-load clients on page load (if clients container present) ----------
-document.addEventListener('DOMContentLoaded', async () => {
-  try {
-    // If there's a container for clients, fetch and render automatically
-    const clientsContainer = document.getElementById('table-container-clients');
-    if (!clientsContainer) return; // nothing to render here
-
-    // fetch clients
-    const rows = await loadClients();
-    window.data_clients = rows; // keep global reference for other code
-
-    // call renderTable (our override) to show clients
-    if (typeof window.renderTable === 'function') {
-      // params: containerId, tableName, data
-      window.renderTable('table-container-clients', 'clients', window.data_clients);
-      console.log('clients.js: rendered', window.data_clients?.length ?? 0, 'clients');
-    } else {
-      console.warn('clients.js: renderTable not defined');
-    }
-  } catch (err) {
-    console.error('clients.js auto-load error:', err);
-  }
-});
