@@ -1,15 +1,18 @@
 // public/js/clients.js
-// Frontend client management (Create + View)
-// Updated to auto-load clients on DOMContentLoaded and provide load/render helpers.
+// Robust client frontend (Create + View) for PGS-ERP
+// - preserves any existing renderTable / showTable functions from app.js
+// - intercepts showTable('clients') to ensure clients are fetched and rendered
+// - exposes window.showClientsNow() for direct calls
+// - keeps create/edit/category UX
 
 console.log('clients.js loaded'); // debug - confirms script is executing
 
-// Load clients helper
+// --------- Load clients helper (exported for other modules if needed) ----------
 export const loadClients = async () => {
   try {
     const res = await fetch('/api/clients', { credentials: 'include' });
     if (!res.ok) {
-      const txt = await res.text().catch(()=>String(res.status));
+      const txt = await res.text().catch(() => String(res.status));
       throw new Error(`Failed to load clients: ${res.status} ${txt}`);
     }
     const json = await res.json();
@@ -150,7 +153,9 @@ window.showClientForm = () => {
       }
 
       alert('Client saved.');
-      if (window.showTable) window.showTable('clients');
+      // If any showTable or our helper exists, re-open the clients table
+      if (window.showClientsNow) await window.showClientsNow();
+      else if (window.showTable) window.showTable('clients');
     } catch (err) {
       console.error('Create client error:', err);
       alert('Error: ' + (err.message || 'Failed'));
@@ -163,8 +168,9 @@ window.showClientForm = () => {
 // Preserve any existing global renderers (from app.js) so other tables still work
 const __origRenderTable = window.renderTable;
 const __origFilterTable = window.filterTable;
+const __origShowTable = window.showTable; // preserve original showTable if present
 
-// Build HTML
+// Build HTML for clients table
 function __clientsTableHTML(rows = []) {
   const esc = (s) => (s == null ? '' : String(s));
   return `
@@ -291,6 +297,48 @@ window.filterTable = function(table) {
   window.renderTable(containerId, table, data, '');
 };
 
+// --------- If other code calls showTable('clients'), intercept it so we fetch & render ---------
+window.showClientsNow = async () => {
+  try {
+    const containerId = 'table-container-clients';
+    // ensure container exists (some apps create it on the fly)
+    if (!document.getElementById(containerId)) {
+      // try to find a generic container; if none, do nothing
+      console.warn('showClientsNow: container not present:', containerId);
+    }
+
+    const rows = await loadClients();
+    window.data_clients = rows;
+    // call our renderTable (which will render when table === 'clients')
+    window.renderTable(containerId, 'clients', window.data_clients);
+    console.log('clients.js: showClientsNow rendered', rows?.length ?? 0);
+  } catch (err) {
+    console.error('showClientsNow error:', err);
+  }
+};
+
+// wrap/override showTable if possible so calls showTable('clients') trigger fetch+render
+window.showTable = function(table, ...rest) {
+  try {
+    if (table === 'clients') {
+      // If an original showTable exists and expects a container name, prefer calling our helper
+      return window.showClientsNow();
+    }
+    // non-clients -> pass to original if present
+    if (typeof __origShowTable === 'function') {
+      return __origShowTable.call(window, table, ...rest);
+    }
+    // fallback: if original not present, but an earlier renderTable exists, call it
+    if (typeof __origRenderTable === 'function') {
+      const containerId = `table-container-${table}`;
+      return __origRenderTable(containerId, table, window[`data_${table}`] || []);
+    }
+    console.warn('showTable: no original showTable/renderTable to call for', table);
+  } catch (e) {
+    console.error('showTable wrapper error:', e);
+  }
+};
+
 // ===== Modals =====
 async function openEditClientModal(id) {
   // Load current client
@@ -378,7 +426,8 @@ async function openEditClientModal(id) {
       if (!r.ok) throw new Error(await r.text());
       close();
       alert('Client updated.');
-      if (window.showTable) window.showTable('clients');
+      if (window.showClientsNow) await window.showClientsNow();
+      else if (window.showTable) window.showTable('clients');
     } catch (err) {
       card.querySelector('#cl_edit_msg').textContent = err.message || 'Update failed.';
     }
@@ -454,7 +503,8 @@ function openAddCategoryModal(id) {
       if (!r.ok) throw new Error(await r.text());
       close();
       alert('Category added.');
-      if (window.showTable) window.showTable('clients');
+      if (window.showClientsNow) await window.showClientsNow();
+      else if (window.showTable) window.showTable('clients');
     } catch (err) {
       card.querySelector('#cat_msg').textContent = err.message || 'Failed to add category.';
     }
