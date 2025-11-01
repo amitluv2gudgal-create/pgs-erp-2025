@@ -322,3 +322,278 @@ window.openEditClient = async (id) => {
     alert('Failed to open editor: ' + (e.message || 'Unknown'));
   }
 };
+
+/* ======= Modal Create Form + Table Renderer Patch ======= */
+
+/* Create Client modal (does NOT replace dashboard DOM) */
+window.openCreateClientModal = () => {
+  // Prevent multiple modals
+  if (document.getElementById('create-client-overlay')) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'create-client-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:9999';
+  const card = document.createElement('div');
+  card.style.cssText = 'background:#fff;min-width:360px;max-width:760px;padding:16px;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.25);max-height:90vh;overflow:auto';
+  card.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <h3 style="margin:0">Create Client</h3>
+      <button id="create-client-close" style="border:none;background:transparent;font-size:24px;cursor:pointer">&times;</button>
+    </div>
+    <form id="clEditForm_modal" style="display:grid;gap:10px;">
+      <label>Name<br><input id="e_name" required></label>
+      <label>Address Line 1 (Billed to)<br><input id="e_addr1"></label>
+      <label>Address Line 2 (Shipped to)<br><input id="e_addr2"></label>
+      <label>PO/dated<br><input id="e_po" placeholder="PGS/SECURITY/105 dated 30th October 2025"></label>
+      <div style="display:flex;gap:10px;">
+        <label style="flex:1">State<br><input id="e_state"></label>
+        <label style="flex:1">District<br><input id="e_district"></label>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <label style="flex:1">Telephone<br><input id="e_tel"></label>
+        <label style="flex:1">Email<br><input id="e_email" type="email"></label>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <label style="flex:1">GST Number<br><input id="e_gst"></label>
+        <label style="flex:1">IGST (%)<br><input id="e_igst" type="number" step="0.01"></label>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <label style="flex:1">CGST (%)<br><input id="e_cgst" type="number" step="0.01"></label>
+        <label style="flex:1">SGST (%)<br><input id="e_sgst" type="number" step="0.01"></label>
+      </div>
+
+      <h4 style="margin:6px 0 0 0">Categories (optional)</h4>
+      <div id="categoriesContainer_modal"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px;">
+        <button type="button" id="addCategoryBtn_modal">Add Category</button>
+        <button type="submit">Create Client</button>
+      </div>
+      <div id="cl_edit_msg_modal" style="color:#b00;"></div>
+    </form>
+  `;
+
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+
+  document.getElementById('create-client-close').onclick = () => overlay.remove();
+  document.getElementById('addCategoryBtn_modal').onclick = () => addCategoryFieldModal();
+
+  // Add first category field
+  addCategoryFieldModal();
+
+  // Form submit
+  document.getElementById('clEditForm_modal').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const payload = {
+      name: document.getElementById('e_name').value.trim(),
+      address_line1: document.getElementById('e_addr1').value.trim(),
+      address_line2: document.getElementById('e_addr2').value.trim(),
+      po_dated: document.getElementById('e_po').value.trim(),
+      state: document.getElementById('e_state').value.trim(),
+      district: document.getElementById('e_district').value.trim(),
+      telephone: document.getElementById('e_tel').value.trim(),
+      email: document.getElementById('e_email').value.trim(),
+      gst_number: document.getElementById('e_gst').value.trim(),
+      igst: document.getElementById('e_igst').value === '' ? null : parseFloat(document.getElementById('e_igst').value),
+      cgst: document.getElementById('e_cgst').value === '' ? null : parseFloat(document.getElementById('e_cgst').value),
+      sgst: document.getElementById('e_sgst').value === '' ? null : parseFloat(document.getElementById('e_sgst').value)
+    };
+
+    // categories from modal
+    const categories = [];
+    const container = document.getElementById('categoriesContainer_modal');
+    const selects = container.querySelectorAll('select.cat_category');
+    const rates = container.querySelectorAll('input.cat_rate');
+    for (let i = 0; i < selects.length; i++) {
+      const cat = selects[i].value;
+      const rateVal = rates[i].value;
+      const monthly_rate = rateVal === '' ? null : parseFloat(rateVal);
+      if (cat) categories.push({ category: cat, monthly_rate });
+    }
+
+    try {
+      const res = await fetch('/api/clients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(()=>({error:'Create failed'}));
+        document.getElementById('cl_edit_msg_modal').textContent = err.error || 'Create failed';
+        return;
+      }
+      const created = await res.json();
+
+      // create categories
+      for (const cat of categories) {
+        await fetch(`/api/clients/${created.id}/categories`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cat)
+        }).catch(()=>console.warn('category add failed for', cat));
+      }
+
+      overlay.remove();
+      alert('Client created');
+      // refresh clients table
+      if (window.refreshClientsTable) window.refreshClientsTable();
+      else if (window.showTable) window.showTable('clients');
+    } catch (err) {
+      console.error(err);
+      document.getElementById('cl_edit_msg_modal').textContent = 'Unexpected error — see console';
+    }
+  });
+};
+
+/* helper to add category line in the create modal */
+function addCategoryFieldModal(){
+  const container = document.getElementById('categoriesContainer_modal');
+  if (!container) return;
+  const idx = container.querySelectorAll('select.cat_category').length || 0;
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:6px;';
+  wrapper.innerHTML = `
+    <select class="cat_category" id="cat_category_modal_${idx}">
+      <option value="">Select Category</option>
+      <option value="security guard">Security Guard</option>
+      <option value="lady sercher">Lady Sercher</option>
+      <option value="security supervisor">Security Supervisor</option>
+      <option value="assistant security officer">Assistant Security Officer</option>
+      <option value="security officer">Security Officer</option>
+      <option value="housekeeper">Housekeeper</option>
+      <option value="housekeeping supervisor">Housekeeping Supervisor</option>
+      <option value="team leader housekeeping">Team Leader Housekeeping</option>
+      <option value="workman unskilled">Workman Unskilled</option>
+      <option value="workman skilled">Workman Skilled</option>
+      <option value="bouncer">Bouncer</option>
+      <option value="gunman">Gunman</option>
+      <option value="cctv operator">CCTV Oprator</option>
+      <option value="office boy">Office Boy</option>
+      <option value="steward">Steward</option>
+    </select>
+    <input class="cat_rate" id="cat_rate_modal_${idx}" type="number" step="0.01" placeholder="Monthly Rate">
+    <button type="button" class="removeCatBtn_modal">Remove</button>
+  `;
+  container.appendChild(wrapper);
+  wrapper.querySelector('.removeCatBtn_modal').onclick = ()=>wrapper.remove();
+}
+
+/* ======= Render clients table with new columns ======= */
+window.renderClientsTable = (clients=[]) => {
+  // find table container — try common IDs, otherwise create one in #content
+  let container = document.getElementById('clients-table-container');
+  if (!container) {
+    const content = document.getElementById('content') || document.body;
+    container = document.createElement('div');
+    container.id = 'clients-table-container';
+    content.innerHTML = ''; // optional: clear only if you want. If you don't want to clear, comment this line.
+    content.appendChild(container);
+  }
+
+  // Build table HTML (responsive horizontally)
+  let html = `<div style="overflow:auto"><table class="clients-table" border="1" cellpadding="6" style="border-collapse:collapse;width:100%;min-width:1100px">
+    <thead style="background:#f2f2f2">
+      <tr>
+        <th>#</th>
+        <th>Name</th>
+        <th>Address (Billed)</th>
+        <th>Address (Shipped)</th>
+        <th>PO/Dated</th>
+        <th>State</th>
+        <th>District</th>
+        <th>Telephone</th>
+        <th>Email</th>
+        <th>GST</th>
+        <th>IGST (%)</th>
+        <th>CGST (%)</th>
+        <th>SGST (%)</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>`;
+
+  clients.forEach((c, idx) => {
+    html += `<tr>
+      <td>${idx+1}</td>
+      <td>${escapeHtml(c.name)}</td>
+      <td>${escapeHtml(c.address_line1 || '')}</td>
+      <td>${escapeHtml(c.address_line2 || '')}</td>
+      <td>${escapeHtml(c.po_dated || '')}</td>
+      <td>${escapeHtml(c.state || '')}</td>
+      <td>${escapeHtml(c.district || '')}</td>
+      <td>${escapeHtml(c.telephone || '')}</td>
+      <td>${escapeHtml(c.email || '')}</td>
+      <td>${escapeHtml(c.gst_number || '')}</td>
+      <td>${c.igst ?? ''}</td>
+      <td>${c.cgst ?? ''}</td>
+      <td>${c.sgst ?? ''}</td>
+      <td>
+        <button data-id="${c.id}" class="editClientBtn">Edit</button>
+        <button data-id="${c.id}" class="addCatBtn">Add Category</button>
+      </td>
+    </tr>`;
+  });
+
+  html += `</tbody></table></div>`;
+
+  container.innerHTML = html;
+
+  // attach actions
+  container.querySelectorAll('.editClientBtn').forEach(btn=>{
+    btn.onclick = (e) => {
+      const id = e.currentTarget.getAttribute('data-id');
+      if (id) window.openEditClient(Number(id));
+    };
+  });
+  container.querySelectorAll('.addCatBtn').forEach(btn=>{
+    btn.onclick = (e) => {
+      const id = e.currentTarget.getAttribute('data-id');
+      if (id) window.showCategoryForm(Number(id));
+    };
+  });
+};
+
+/* small html escape helper used by renderer */
+function escapeHtml(s){
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'",'&#39;');
+}
+
+/* ====== Hook into existing showTable('clients') if present ====== */
+if (window.showTable && !window._clients_showTable_hooked) {
+  window._clients_showTable_hooked = true;
+  // keep original
+  window._showTable_original = window.showTable;
+  window.showTable = async (name) => {
+    if (name === 'clients') {
+      try {
+        const clients = await loadClients();
+        window.renderClientsTable(clients);
+      } catch (e) {
+        console.error('Failed to load clients for table:', e);
+      }
+    } else {
+      return window._showTable_original(name);
+    }
+  };
+} else {
+  // no showTable present — provide a refresh function
+  window.refreshClientsTable = async () => {
+    try {
+      const clients = await loadClients();
+      window.renderClientsTable(clients);
+    } catch (e) {
+      console.error('refreshClientsTable error', e);
+    }
+  };
+}
+
+/* Also expose a safe Create button helper that UI can call */
+window.showClientForm = () => window.openCreateClientModal();
+
+/* End of patch */
