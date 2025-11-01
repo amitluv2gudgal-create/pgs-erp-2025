@@ -1,14 +1,22 @@
 // public/js/clients.js
-// Frontend client management (Create + View)
-// Updated for Address Line 1, Address Line 2, PO/dated, and richer table rendering.
-// Clean version: no inline onclicks; uses event delegation.
+// Fixed and cleaned Clients frontend (Create + View)
+// - corrects table markup and column alignment
+// - preserves legacy functions and integrates with existing showTable/filterTable
 
 export const loadClients = async () => {
   try {
     const res = await fetch('/api/clients', { credentials: 'include' });
-    return res.ok ? await res.json() : [];
+    if (!res.ok) {
+      console.error('loadClients: server returned', res.status);
+      window.data_clients = [];
+      return [];
+    }
+    const data = await res.json();
+    window.data_clients = Array.isArray(data) ? data : [];
+    return window.data_clients;
   } catch (e) {
     console.error('loadClients failed:', e);
+    window.data_clients = [];
     return [];
   }
 };
@@ -52,6 +60,7 @@ window.showClientForm = () => {
       <label>CGST (%)<br><input type="number" step="0.01" id="c_cgst" placeholder="9"></label><br><br>
       <label>SGST (%)<br><input type="number" step="0.01" id="c_sgst" placeholder="9"></label><br><br>
       <label>IGST (%)<br><input type="number" step="0.01" id="c_igst" placeholder="18"></label><br><br>
+
       <div id="categoriesContainer">
         <h4>Categories (optional)</h4>
       </div>
@@ -62,34 +71,33 @@ window.showClientForm = () => {
   `;
 
   const addCategoryField = () => {
-  const cats = document.getElementById('categoriesContainer');
-  const row = document.createElement('div');
-  row.className = 'cat-row';
-  row.style.margin = '6px 0';
-  row.innerHTML = `
-    <select class="cat-select">
-      <option value="">Select Category</option>
-      <option value="security guard">Security Guard</option>
-      <option value="lady sercher">Lady Sercher</option>
-      <option value="security supervisor">Security Supervisor</option>
-      <option value="assistant security officer">Assistant Security Officer</option>
-      <option value="security officer">Security Officer</option>
-      <option value="housekeeper">Housekeeper</option>
-      <option value="housekeeping supervisor">Housekeeping Supervisor</option>
-      <option value="team leader housekeeping">Team Leader Housekeeping</option>
-      <option value="workman unskilled">Workman Unskilled</option>
-      <option value="workman skilled">Workman Skilled</option>
-      <option value="bouncer">Bouncer</option>
-      <option value="gunman">Gunman</option>
-      <option value="cctv operator">CCTV Operator</option>
-      <option value="office boy">Office Boy</option>
-      <option value="steward">Steward</option> 
-    </select>
-    <input type="number" step="0.01" placeholder="Monthly Rate" class="cat-rate" style="width:160px;">
-  `;
-  cats.appendChild(row);
-};
-
+    const cats = document.getElementById('categoriesContainer');
+    const row = document.createElement('div');
+    row.className = 'cat-row';
+    row.style.margin = '6px 0';
+    row.innerHTML = `
+      <select class="cat-select">
+        <option value="">Select Category</option>
+        <option value="security guard">Security Guard</option>
+        <option value="lady sercher">Lady Sercher</option>
+        <option value="security supervisor">Security Supervisor</option>
+        <option value="assistant security officer">Assistant Security Officer</option>
+        <option value="security officer">Security Officer</option>
+        <option value="housekeeper">Housekeeper</option>
+        <option value="housekeeping supervisor">Housekeeping Supervisor</option>
+        <option value="team leader housekeeping">Team Leader Housekeeping</option>
+        <option value="workman unskilled">Workman Unskilled</option>
+        <option value="workman skilled">Workman Skilled</option>
+        <option value="bouncer">Bouncer</option>
+        <option value="gunman">Gunman</option>
+        <option value="cctv operator">CCTV Operator</option>
+        <option value="office boy">Office Boy</option>
+        <option value="steward">Steward</option>
+      </select>
+      <input type="number" step="0.01" placeholder="Monthly Rate" class="cat-rate" style="width:160px;">
+    `;
+    cats.appendChild(row);
+  };
 
   document.getElementById('btnAddCat').onclick = addCategoryField;
   addCategoryField(); // start with one row by default
@@ -172,10 +180,12 @@ function __clientsTableHTML(rows = []) {
           <th style="text-align:left;">PO/dated</th>
           <th style="text-align:left;">State</th>
           <th style="text-align:left;">District</th>
-          <th style="text-align:left;">Telephone</</th>
+          <th style="text-align:left;">Telephone</th>
+          <th style="text-align:left;">GST Number</th>
           <th style="text-align:left;">Email</th>
           <th style="text-align:left;">CGST</th>
           <th style="text-align:left;">SGST</th>
+          <th style="text-align:left;">IGST</th>
           <th style="text-align:left;">Categories</th>
           <th style="text-align:left; width:160px;">Actions</th>
         </tr>
@@ -196,7 +206,7 @@ function __clientsTableHTML(rows = []) {
             <td>${esc(c.cgst ?? '')}</td>
             <td>${esc(c.sgst ?? '')}</td>
             <td>${esc(c.igst ?? '')}</td>
-            <td>${esc(c.categories || '')}</td>
+            <td>${esc(c.categories ? (Array.isArray(c.categories) ? c.categories.join(', ') : c.categories) : '')}</td>
             <td>
               <button class="btn-edit-client">Edit</button>
               <button class="btn-add-cat">Add Category</button>
@@ -246,6 +256,7 @@ window.renderTable = function(containerId, table, data, query) {
   const searchVal = searchEl ? searchEl.value : (query || '');
   const exact = exactEl ? !!exactEl.checked : false;
 
+  // prefer passed data, fallback to window.data_clients
   const src = Array.isArray(data) ? data : (window.data_clients || []);
   const filtered = __filterClientsData(src, searchVal, exact);
 
@@ -285,7 +296,6 @@ window.filterTable = function(table) {
 
 // ===== Modals =====
 async function openEditClientModal(id) {
-  // Load current client
   let client;
   try {
     const r = await fetch(`/api/clients/${id}`, { credentials: 'include' });
@@ -302,7 +312,7 @@ async function openEditClientModal(id) {
   card.style.cssText = 'background:#fff;min-width:420px;max-width:640px;padding:16px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2)';
   card.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-      <h3 style="margin:0;">Edit Client #${id}</h3>
+      <h3 style="margin:0;">Edit Client #${escHtml(client.id)}</h3>
       <button id="cl-edit-close" style="border:none;background:transparent;font-size:20px;cursor:pointer">&times;</button>
     </div>
     <form id="clEditForm" style="display:grid;gap:10px;">
@@ -318,10 +328,12 @@ async function openEditClientModal(id) {
         <label style="flex:1">Telephone<br><input id="e_tel" value="${escHtml(client.telephone || '')}"></label>
         <label style="flex:1">Email<br><input id="e_email" type="email" value="${escHtml(client.email || '')}"></label>
       </div>
+      <label>GST Number<br><input id="e_gst" value="${escHtml(client.gst_number || '')}"></label>
       <div style="display:flex;gap:10px;">
         <label style="flex:1">CGST (%)<br><input id="e_cgst" type="number" step="0.01" value="${client.cgst ?? ''}"></label>
         <label style="flex:1">SGST (%)<br><input id="e_sgst" type="number" step="0.01" value="${client.sgst ?? ''}"></label>
       </div>
+      <label>IGST (%)<br><input id="e_igst" type="number" step="0.01" value="${client.igst ?? ''}"></label>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px;">
         <button type="submit">Save</button>
         <button type="button" id="cl-edit-cancel">Cancel</button>
@@ -380,30 +392,29 @@ function openAddCategoryModal(id) {
   card.style.cssText = 'background:#fff;min-width:360px;max-width:520px;padding:16px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2)';
   card.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-      <h3 style="margin:0;">Add Category to Client #${id}</h3>
+      <h3 style="margin:0;">Add Category to Client #${escHtml(id)}</h3>
       <button id="cat-close" style="border:none;background:transparent;font-size:20px;cursor:pointer">&times;</button>
     </div>
     <form id="catForm" style="display:grid;gap:10px;">
       <label>Category<br>
         <select id="cat_category">
-  <option value="">Select Category</option>
-  <option value="security guard">Security Guard</option>
-  <option value="lady sercher">Lady Sercher</option>
-  <option value="security supervisor">Security Supervisor</option>
-  <option value="assistant security officer">Assistant Security Officer</option>
-  <option value="security officer">Security Officer</option>
-  <option value="housekeeper">Housekeeper</option>
-  <option value="housekeeping supervisor">Housekeeping Supervisor</option>
-  <option value="team leader housekeeping">Team Leader Housekeeping</option>
-  <option value="workman unskilled">Workman Unskilled</option>
-  <option value="workman skilled">Workman Skilled</option>
-  <option value="bouncer">Bouncer</option>
-  <option value="gunman">Gunman</option>
-  <option value="cctv operator">CCTV Oprator</option>
-  <option value="office boy">Office Boy</option>
-  <option value="steward">Steward</option>
-</select>
-
+          <option value="">Select Category</option>
+          <option value="security guard">Security Guard</option>
+          <option value="lady sercher">Lady Sercher</option>
+          <option value="security supervisor">Security Supervisor</option>
+          <option value="assistant security officer">Assistant Security Officer</option>
+          <option value="security officer">Security Officer</option>
+          <option value="housekeeper">Housekeeper</option>
+          <option value="housekeeping supervisor">Housekeeping Supervisor</option>
+          <option value="team leader housekeeping">Team Leader Housekeeping</option>
+          <option value="workman unskilled">Workman Unskilled</option>
+          <option value="workman skilled">Workman Skilled</option>
+          <option value="bouncer">Bouncer</option>
+          <option value="gunman">Gunman</option>
+          <option value="cctv operator">CCTV Operator</option>
+          <option value="office boy">Office Boy</option>
+          <option value="steward">Steward</option>
+        </select>
       </label>
       <label>Monthly Rate<br><input type="number" step="0.01" id="cat_rate" placeholder="e.g., 18000"></label>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px;">
@@ -468,9 +479,7 @@ function numOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 function escHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (m) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  }[m]));
+  return String(s ?? '').replace(/[&<>"']/g, (m) => ( { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m] ));
 }
 
 // Compatibility shims for legacy inline onclicks (safe to keep alongside delegation)
