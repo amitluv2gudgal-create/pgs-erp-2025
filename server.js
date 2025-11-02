@@ -2,6 +2,7 @@
 import express from 'express';
 import cors from 'cors';
 import session from 'express-session';
+import SQLiteStoreFactory from 'connect-sqlite3';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
 
@@ -27,6 +28,8 @@ app.use(express.json());
 // Behind Render's proxy, this is REQUIRED for secure cookies to be set
 app.set('trust proxy', 1);
 
+const SQLiteStore = SQLiteStoreFactory(session);
+
 const { SESSION_SECRET, NODE_ENV } = process.env;
 const PORT = process.env.PORT || 3000;
 
@@ -40,14 +43,19 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
 app.use(session({
-  secret: SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false,
+  store: new SQLiteStore({
+    db: 'sessions.sqlite',   // file name for sessions DB
+    dir: './data',           // directory (ensure this exists or use './')
+    concurrentDB: true       // safer with multiple connections
+    // other options: table: 'sessions'
+  }),
+  secret: process.env.SESSION_SECRET || 'f1485d3772873244db48c4248f74a0aebeaaa27b94b0a2d9de2a32f349d416cf',
+  resave: false,             // recommended: false
+  saveUninitialized: false,  // recommended: false
   cookie: {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: NODE_ENV === 'production',
-    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    maxAge: 24 * 60 * 60 * 1000, // 1 day
+    secure: true,                // require HTTPS (Render serves HTTPS)
+    sameSite: 'lax'              // adjust as required
   }
 }));
 
