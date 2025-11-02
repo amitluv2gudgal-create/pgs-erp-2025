@@ -1,7 +1,6 @@
 // PGS-ERP/controllers/deductions.js
 import express from 'express';
 import { query, run } from '../db.js';
-import db from '../db.js';
 
 
 const router = express.Router();
