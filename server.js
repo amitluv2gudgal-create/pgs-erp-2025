@@ -42,6 +42,23 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
+let sessionStore = null;
+
+async function initSessionStore() {
+  try {
+    // dynamic import - won't crash at startup if package missing
+    const mod = await import('connect-sqlite3');
+    const SQLiteStoreFactory = mod.default ?? mod;
+    const SQLiteStore = SQLiteStoreFactory(session);
+    sessionStore = new SQLiteStore({ db: 'sessions.sqlite', dir: './data', concurrentDB: true });
+    console.log('Using connect-sqlite3 session store.');
+  } catch (err) {
+    // package not installed or failed to load
+    console.warn('connect-sqlite3 not available, falling back to MemoryStore (not for production).', err && err.message);
+    sessionStore = null; // MemoryStore used by express-session if store not provided
+  }
+}
+
 app.use(session({
   store: new SQLiteStore({
     db: 'sessions.sqlite',   // file name for sessions DB
