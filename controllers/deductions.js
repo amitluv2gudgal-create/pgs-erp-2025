@@ -8,12 +8,13 @@ const router = express.Router();
 router.get('/', async (req, res) => {
   try {
     // Return common join to include employee name (if you already do that adjust accordingly)
-    const rows = await query(`SELECT d.id, d.employee_id, d.amount, d.reason, d.date, d.month, d.note,
-                                      e.name AS employee_name
-                               FROM deductions d
-                               LEFT JOIN employees e ON e.id = d.employee_id
-                               ORDER BY d.id DESC`);
-    res.json(rows);
+    const rows = await db.all(`
+  SELECT id, employee_id, amount, reason, month, note
+  FROM deductions
+  ORDER BY id DESC
+`);
+res.json(rows);
+
   } catch (err) {
     console.error('GET /api/deductions error', err);
     res.status(500).json({ error: err.message });
@@ -39,7 +40,7 @@ router.post('/', async (req, res) => {
     const { employee_id, month, reason, amount, note } = req.body;
 
     // Basic validation (adjust role check if required)
-    if (!employee_id || !month || !reason || !(amount > 0)) {
+    if (!employee_id || !month || !reason || !note || !(amount > 0)) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
