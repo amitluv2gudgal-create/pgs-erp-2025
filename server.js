@@ -1,5 +1,6 @@
 // server.js
 import express from 'express';
+import cors from 'cors';
 import session from 'express-session';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
@@ -21,7 +22,8 @@ import securitySupervisorRoutes from './controllers/security_supervisors.js';
 dotenv.config();
 
 const app = express();
-
+app.use(cors()); // allow all origins; restrict in production as needed
+app.use(express.json());
 // Behind Render's proxy, this is REQUIRED for secure cookies to be set
 app.set('trust proxy', 1);
 
