@@ -19,7 +19,7 @@ import invoiceRoutes from './controllers/invoices.js';
 import salaryRoutes from './controllers/salaries.js';
 import requestRoutes from './controllers/requests.js';
 import securitySupervisorRoutes from './controllers/security_supervisors.js';
-import deductionRoutes from './controllers/deductions.js';
+import deductionsRouter from './controllers/deductions.js';
 dotenv.config();
 
 const app = express();
@@ -107,7 +107,7 @@ async function bootstrap() {
     app.use('/api/salaries', salaryRoutes);
     app.use('/api/requests', requestRoutes);
     app.use('/api/security-supervisors', securitySupervisorRoutes);
-
+    app.use('/api/deductions', deductionsRouter);
     // 4) Basic pages
     app.get('/', (req, res) => res.redirect('/login.html'));
     app.get('/favicon.ico', (req, res) => res.status(204).end());
