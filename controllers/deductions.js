@@ -7,7 +7,7 @@ import db from '../db.js';
 const router = express.Router();
 
 // GET all deductions with employee name
-export const listDeductions = async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const rows = await db.all(`
       SELECT id, employee_id, amount, reason, month, note
@@ -19,7 +19,7 @@ export const listDeductions = async (req, res) => {
     console.error('listDeductions error', err);
     res.status(500).json({ error: err.message || 'DB error' });
   }
-};
+})
 
 // Get single deduction
 router.get('/:id', async (req, res) => {
