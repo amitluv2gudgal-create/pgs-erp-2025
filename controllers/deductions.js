@@ -1,25 +1,25 @@
 // PGS-ERP/controllers/deductions.js
 import express from 'express';
 import { query, run } from '../db.js';
+import db from '../db.js';
+
 
 const router = express.Router();
 
 // GET all deductions with employee name
-router.get('/', async (req, res) => {
+export const listDeductions = async (req, res) => {
   try {
-    // Return common join to include employee name (if you already do that adjust accordingly)
     const rows = await db.all(`
-  SELECT id, employee_id, amount, reason, month, note
-  FROM deductions
-  ORDER BY id DESC
-`);
-res.json(rows);
-
+      SELECT id, employee_id, amount, reason, month, note
+      FROM deductions
+      ORDER BY id DESC
+    `);
+    res.json(rows);
   } catch (err) {
-    console.error('GET /api/deductions error', err);
-    res.status(500).json({ error: err.message });
+    console.error('listDeductions error', err);
+    res.status(500).json({ error: err.message || 'DB error' });
   }
-});
+};
 
 // Get single deduction
 router.get('/:id', async (req, res) => {
