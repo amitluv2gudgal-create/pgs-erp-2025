@@ -1,85 +1,42 @@
 // db.js
-// ES module, robust sqlite initialization with safe fallback for Render
+// Robust DB initializer & helpers for PGS-ERP
+// - honors process.env.DB_PATH
+// - auto-creates parent dir
+// - ensures core tables + idempotent migrations
+//
+// Usage:
+//   import initDB, { getDB, all, get, run, exec } from './db.js';
+//   await initDB(); // at server startup
+
+import fs from 'fs';
+import path from 'path';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
-import path from 'path';
-import fs from 'fs';
 
-// Exported DB path (will be assigned to resolved path)
-export let DB_PATH = process.env.DB_PATH || path.join(process.cwd(), 'data', 'database.db');
+const DEFAULT_DB = path.join(process.cwd(), 'data', 'database.db'); // local dev fallback
+const DB_PATH = (process.env.DB_PATH && process.env.DB_PATH.trim()) || DEFAULT_DB;
 
-let db = null;
+let dbInstance = null;
 
-/**
- * Resolve a safe DB path:
- * - prefer process.env.DB_PATH if inside project root
- * - otherwise fall back to ./data/database.db inside project root
- * - ensure directory exists
- */
-function resolveDbPath() {
-  const projectRoot = process.cwd(); // e.g. /opt/render/project/src on Render
-  const requested = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : path.join(projectRoot, 'data', 'database.db');
-  let resolved = requested;
-
-  // If requested path is outside project root, fallback to project data folder
-  if (!resolved.startsWith(projectRoot)) {
-    resolved = path.join(projectRoot, 'data', 'database.db');
-    console.warn('[db] DB_PATH pointed outside project root; falling back to in-project DB at', resolved);
-  }
-
-  // Ensure directory exists; try to create if missing
-  const dir = path.dirname(resolved);
+async function ensureDir(filePath) {
   try {
+    const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
       console.log('[db] Created DB directory:', dir);
     }
   } catch (err) {
-    console.error('[db] Could not create DB directory:', dir, err && err.message ? err.message : err);
-    // Final fallback to project data folder if creation failed
-    const fallback = path.join(projectRoot, 'data', 'database.db');
-    try {
-      if (!fs.existsSync(path.dirname(fallback))) fs.mkdirSync(path.dirname(fallback), { recursive: true });
-      resolved = fallback;
-      console.warn('[db] Falling back to', resolved);
-    } catch (err2) {
-      console.error('[db] Final fallback failed:', err2 && err2.message ? err2.message : err2);
-      // Let caller handle the error when attempting to open DB
-    }
+    console.warn('[db] Could not create DB directory:', err && err.message ? err.message : err);
   }
-
-  return resolved;
 }
 
-/**
- * Initialize DB: open connection, create tables, run safe migrations.
- * Exported as initDB (uppercase D) to match server.js import.
- */
-export async function initDB() {
-  try {
-    // Determine safe path and assign exported DB_PATH
-    const resolved = resolveDbPath();
-    DB_PATH = resolved;
-
-    db = await open({
-      filename: DB_PATH,
-      driver: sqlite3.Database
-    });
-
-    console.log('[db] opened at', DB_PATH);
-
-    // Core table creations (idempotent)
-    await db.exec(`CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT UNIQUE,
-      password TEXT,
-      role TEXT
-    );`);
-
-    await db.exec(`CREATE TABLE IF NOT EXISTS clients (
+async function createCoreTables(db) {
+  // Create minimal core tables used by the app.
+  // Keep columns conservative — controllers may rely on specific names.
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS clients (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT,
-      address TEXT,
       address_line1 TEXT,
       address_line2 TEXT,
       po_dated TEXT,
@@ -91,208 +48,208 @@ export async function initDB() {
       gst_number TEXT,
       cgst REAL,
       sgst REAL,
-      igst REAL
-    );`);
+      igst REAL,
+      monthly_rate REAL
+    );
+  `);
 
-    await db.exec(`CREATE TABLE IF NOT EXISTS client_categories (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      client_id INTEGER,
-      category TEXT,
-      monthly_rate REAL,
-      FOREIGN KEY(client_id) REFERENCES clients(id)
-    );`);
-
-    await db.exec(`CREATE TABLE IF NOT EXISTS employees (
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS employees (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT,
-      father_name TEXT,
-      local_address TEXT,
-      permanent_address TEXT,
-      telephone TEXT,
-      email TEXT,
-      marital_status TEXT,
-      spouse_name TEXT,
-      next_kin_name TEXT,
-      next_kin_telephone TEXT,
-      next_kin_address TEXT,
-      identifier_name TEXT,
-      identifier_address TEXT,
-      identifier_telephone TEXT,
-      epf_number TEXT,
-      esic_number TEXT,
-      criminal_record TEXT,
-      salary_per_month REAL,
-      category TEXT,
-      client_id INTEGER,
-      FOREIGN KEY(client_id) REFERENCES clients(id)
-    );`);
+      employee_id TEXT,
+      role TEXT,
+      address_line1 TEXT,
+      address_line2 TEXT,
+      state TEXT,
+      district TEXT,
+      contact TEXT,
+      salary_per_day REAL,
+      joined_on TEXT
+    );
+  `);
 
-    await db.exec(`CREATE TABLE IF NOT EXISTS attendances (
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS attendances (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       employee_id INTEGER,
       date TEXT,
-      present INTEGER,
-      submitted_by INTEGER,
-      client_id INTEGER,
-      status TEXT DEFAULT 'pending',
-      FOREIGN KEY(employee_id) REFERENCES employees(id)
-    );`);
+      present INTEGER DEFAULT 0,
+      site_id INTEGER,
+      notes TEXT
+    );
+  `);
 
-    await db.exec(`CREATE TABLE IF NOT EXISTS deductions (
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS deductions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       employee_id INTEGER,
       amount REAL,
       reason TEXT,
-      date TEXT,
-      month TEXT,
-      note TEXT,
-      FOREIGN KEY(employee_id) REFERENCES employees(id)
-    );`);
+      date TEXT
+    );
+  `);
 
-    await db.exec(`CREATE TABLE IF NOT EXISTS invoices (
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS invoices (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       client_id INTEGER,
-      month TEXT,
-      invoice_no TEXT,
-      subtotal REAL,
-      service_charges REAL,
-      total REAL,
-      cgst_amount REAL,
-      sgst_amount REAL,
-      grand_total REAL,
-      invoice_date TEXT,
-      FOREIGN KEY(client_id) REFERENCES clients(id)
-    );`);
+      invoice_number TEXT,
+      period_start TEXT,
+      period_end TEXT,
+      amount REAL,
+      created_at TEXT,
+      pdf_path TEXT
+    );
+  `);
 
-    await db.exec(`CREATE TABLE IF NOT EXISTS salaries (
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS salaries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       employee_id INTEGER,
       month TEXT,
-      attendance_days INTEGER,
       amount REAL,
-      deductions REAL,
-      net_amount REAL,
-      salary_date TEXT,
-      FOREIGN KEY(employee_id) REFERENCES employees(id)
-    );`);
+      generated_at TEXT,
+      pdf_path TEXT
+    );
+  `);
 
-    await db.exec(`CREATE TABLE IF NOT EXISTS requests (
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS requests (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      requester_id INTEGER,
-      action TEXT,
-      table_name TEXT,
-      record_id INTEGER,
-      data TEXT,
-      new_data TEXT,
+      resource TEXT,
+      resource_id INTEGER,
+      action TEXT,         -- e.g. 'edit' or 'delete'
+      payload TEXT,        -- JSON string with requested changes
+      approver_id INTEGER, -- user id of approver (added by migration if missing)
       status TEXT DEFAULT 'pending',
-      approver_id INTEGER,
-      FOREIGN KEY(requester_id) REFERENCES users(id)
-    );`);
+      created_at TEXT
+    );
+  `);
 
-    await db.exec(`CREATE TABLE IF NOT EXISTS security_supervisors (
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT,
       username TEXT UNIQUE,
-      password TEXT,
-      client_id INTEGER,
-      site_name TEXT,
-      created_by INTEGER,
-      FOREIGN KEY(client_id) REFERENCES clients(id),
-      FOREIGN KEY(created_by) REFERENCES users(id)
-    );`);
-
-    // Safe migrations: add missing columns if needed
-    await ensureClientExtraFields();
-    await ensureRequestsApproverColumn();
-    await dropLegacyClientAddressColumn();
-
-    console.log('[db] initialization completed');
-    return db;
-  } catch (err) {
-    console.error('[db] initDB failed:', err && err.message ? err.message : err);
-    throw err;
-  }
+      password_hash TEXT,
+      role TEXT,
+      created_at TEXT
+    );
+  `);
 }
 
-/**
- * Migration helpers (idempotent)
- */
-export async function ensureClientExtraFields() {
-  if (!db) throw new Error('DB not initialized');
+async function runMigrations(db) {
   try {
-    const rows = await db.all("PRAGMA table_info(clients);");
-    const colNames = Array.isArray(rows) ? rows.map(r => r.name) : [];
-    if (!colNames.includes('gst_number')) {
-      console.log('[db] Adding gst_number column to clients');
+    // clients: ensure monthly_rate, gst_number, igst exist (idempotent)
+    const clientCols = await db.all("PRAGMA table_info('clients');");
+    const clientColNames = (clientCols || []).map(c => c.name);
+
+    if (!clientColNames.includes('monthly_rate')) {
+      console.log('[db] Migration: adding clients.monthly_rate');
+      await db.exec("ALTER TABLE clients ADD COLUMN monthly_rate REAL;");
+    } else {
+      console.log('[db] Migration: clients.monthly_rate exists');
+    }
+
+    if (!clientColNames.includes('gst_number')) {
+      console.log('[db] Migration: adding clients.gst_number');
       await db.exec("ALTER TABLE clients ADD COLUMN gst_number TEXT;");
     } else {
-      console.log('[db] clients.gst_number exists');
+      // likely already exists; keep silent
     }
-    if (!colNames.includes('igst')) {
-      console.log('[db] Adding igst column to clients');
+
+    if (!clientColNames.includes('igst')) {
+      console.log('[db] Migration: adding clients.igst');
       await db.exec("ALTER TABLE clients ADD COLUMN igst REAL;");
     } else {
-      console.log('[db] clients.igst exists');
+      // ok
     }
-  } catch (err) {
-    console.error('[db] ensureClientExtraFields error:', err && err.message ? err.message : err);
-    throw err;
-  }
-}
 
-export async function ensureRequestsApproverColumn() {
-  if (!db) throw new Error('DB not initialized');
-  try {
-    const rows = await db.all("PRAGMA table_info(requests);");
-    const colNames = Array.isArray(rows) ? rows.map(r => r.name) : [];
-    if (!colNames.includes('approver_id')) {
-      console.log('[db] Adding approver_id to requests');
+    // requests: ensure approver_id exists
+    const reqCols = await db.all("PRAGMA table_info('requests');");
+    const reqColNames = (reqCols || []).map(c => c.name);
+    if (!reqColNames.includes('approver_id')) {
+      console.log('[db] Migration: adding requests.approver_id');
       await db.exec("ALTER TABLE requests ADD COLUMN approver_id INTEGER;");
     } else {
-      console.log('[db] requests.approver_id exists');
+      console.log('[db] Migration: requests.approver_id exists');
     }
-  } catch (err) {
-    // tolerate and log
-    console.warn('[db] ensureRequestsApproverColumn warning:', err && err.message ? err.message : err);
+
+    // If you need to drop legacy 'address' column, do that via safe rebuild migration separately.
+  } catch (merr) {
+    console.warn('[db] Migration step failed (non-fatal):', merr && merr.message ? merr.message : merr);
   }
 }
 
-export async function dropLegacyClientAddressColumn() {
-  // No-op placeholder to match server import; dropping columns in SQLite requires table rebuild.
-  console.log('[db] dropLegacyClientAddressColumn: no-op (preserving legacy address column)');
+async function initDB() {
+  if (dbInstance) return dbInstance;
+
+  // Ensure parent directory exists
+  await ensureDir(DB_PATH);
+
+  // Open DB
+  try {
+    dbInstance = await open({
+      filename: DB_PATH,
+      driver: sqlite3.Database
+    });
+    console.log('[db] SQLite opened at', DB_PATH);
+  } catch (err) {
+    console.error('[db] Failed to open DB at', DB_PATH, '->', err && err.stack ? err.stack : err);
+    // Fallback to in-project DB to allow process to start (but log clearly)
+    const fallback = DEFAULT_DB;
+    try {
+      await ensureDir(fallback);
+      dbInstance = await open({ filename: fallback, driver: sqlite3.Database });
+      console.warn('[db] Falling back to in-project DB at', fallback);
+    } catch (err2) {
+      console.error('[db] Fatal: could not open fallback DB at', fallback, err2 && err2.stack ? err2.stack : err2);
+      throw err2; // let process crash so platform shows failure
+    }
+  }
+
+  // Create core tables if missing
+  try {
+    await createCoreTables(dbInstance);
+  } catch (cErr) {
+    console.error('[db] Error creating core tables:', cErr && cErr.stack ? cErr.stack : cErr);
+    // continue; table creation problems will surface later
+  }
+
+  // Run idempotent migrations
+  await runMigrations(dbInstance);
+
+  console.log('[db] initialization completed');
+  return dbInstance;
 }
 
-/**
- * Simple query/run wrappers (export to controllers)
- */
-export const query = async (sql, params = []) => {
-  if (!db) throw new Error('DB not initialized');
+// Convenience helpers for controllers
+async function getDB() {
+  if (!dbInstance) {
+    await initDB();
+  }
+  return dbInstance;
+}
+
+async function all(sql, params = []) {
+  const db = await getDB();
   return db.all(sql, params);
-};
+}
 
-export const run = async (sql, params = []) => {
-  if (!db) throw new Error('DB not initialized');
+async function get(sql, params = []) {
+  const db = await getDB();
+  return db.get(sql, params);
+}
+
+async function run(sql, params = []) {
+  const db = await getDB();
   return db.run(sql, params);
-};
+}
 
-// Provide a dbModule object and named exports expected by server.js
-export const dbModule = {
-  initDB,
-  ensureClientExtraFields,
-  ensureRequestsApproverColumn,
-  dropLegacyClientAddressColumn,
-  query,
-  run
-};
+async function exec(sql) {
+  const db = await getDB();
+  return db.exec(sql);
+}
 
-// Default export for backward compatibility
-export default {
-  initDB,
-  ensureClientExtraFields,
-  ensureRequestsApproverColumn,
-  dropLegacyClientAddressColumn,
-  query,
-  run,
-  dbModule,
-  DB_PATH
-};
+export default initDB;
+export { getDB, all, get, run, exec };
