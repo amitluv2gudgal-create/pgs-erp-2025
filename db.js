@@ -4,17 +4,18 @@
 // - auto-creates parent dir
 // - ensures core tables + idempotent migrations
 //
-// Usage:
-//   import initDB, { getDB, all, get, run, exec, query, queryOne } from './db.js';
-//   await initDB(); // at server startup
+// Exports:
+//   default initDB()
+//   getDB, all, get, run, exec, query, queryOne
+//   DB_PATH, DEFAULT_DB
 
 import fs from 'fs';
 import path from 'path';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 
-const DEFAULT_DB = path.join(process.cwd(), 'data', 'database.db'); // local dev fallback
-const DB_PATH = (process.env.DB_PATH && process.env.DB_PATH.trim()) || DEFAULT_DB;
+export const DEFAULT_DB = path.join(process.cwd(), 'data', 'database.db'); // local dev fallback
+export const DB_PATH = (process.env.DB_PATH && process.env.DB_PATH.trim()) || DEFAULT_DB;
 
 let dbInstance = null;
 
@@ -31,8 +32,6 @@ async function ensureDir(filePath) {
 }
 
 async function createCoreTables(db) {
-  // Create minimal core tables used by the app.
-  // Keep columns conservative — controllers may rely on specific names.
   await db.exec(`
     CREATE TABLE IF NOT EXISTS clients (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -140,7 +139,6 @@ async function createCoreTables(db) {
 
 async function runMigrations(db) {
   try {
-    // clients: ensure monthly_rate, gst_number, igst exist (idempotent)
     const clientCols = await db.all("PRAGMA table_info('clients');");
     const clientColNames = (clientCols || []).map(c => c.name);
 
@@ -161,7 +159,6 @@ async function runMigrations(db) {
       await db.exec("ALTER TABLE clients ADD COLUMN igst REAL;");
     }
 
-    // requests: ensure approver_id exists
     const reqCols = await db.all("PRAGMA table_info('requests');");
     const reqColNames = (reqCols || []).map(c => c.name);
     if (!reqColNames.includes('approver_id')) {
@@ -170,19 +167,17 @@ async function runMigrations(db) {
     } else {
       console.log('[db] Migration: requests.approver_id exists');
     }
-
   } catch (merr) {
     console.warn('[db] Migration step failed (non-fatal):', merr && merr.message ? merr.message : merr);
   }
 }
 
-async function initDB() {
+export async function initDB() {
   if (dbInstance) return dbInstance;
 
   // Ensure parent directory exists
   await ensureDir(DB_PATH);
 
-  // Open DB
   try {
     dbInstance = await open({
       filename: DB_PATH,
@@ -191,69 +186,63 @@ async function initDB() {
     console.log('[db] SQLite opened at', DB_PATH);
   } catch (err) {
     console.error('[db] Failed to open DB at', DB_PATH, '->', err && err.stack ? err.stack : err);
-    // Fallback to in-project DB to allow process to start (but log clearly)
-    const fallback = DEFAULT_DB;
+    // fallback to DEFAULT_DB so app can still start and logs show the issue
     try {
-      await ensureDir(fallback);
-      dbInstance = await open({ filename: fallback, driver: sqlite3.Database });
-      console.warn('[db] Falling back to in-project DB at', fallback);
+      await ensureDir(DEFAULT_DB);
+      dbInstance = await open({ filename: DEFAULT_DB, driver: sqlite3.Database });
+      console.warn('[db] Falling back to in-project DB at', DEFAULT_DB);
     } catch (err2) {
-      console.error('[db] Fatal: could not open fallback DB at', fallback, err2 && err2.stack ? err2.stack : err2);
-      throw err2; // let process crash so platform shows failure
+      console.error('[db] Fatal: could not open fallback DB at', DEFAULT_DB, err2 && err2.stack ? err2.stack : err2);
+      throw err2;
     }
   }
 
-  // Create core tables if missing
   try {
     await createCoreTables(dbInstance);
   } catch (cErr) {
     console.error('[db] Error creating core tables:', cErr && cErr.stack ? cErr.stack : cErr);
   }
 
-  // Run idempotent migrations
   await runMigrations(dbInstance);
 
   console.log('[db] initialization completed');
   return dbInstance;
 }
 
+export default initDB;
+
 // Convenience helpers for controllers
-async function getDB() {
+export async function getDB() {
   if (!dbInstance) {
     await initDB();
   }
   return dbInstance;
 }
 
-async function all(sql, params = []) {
+export async function all(sql, params = []) {
   const db = await getDB();
   return db.all(sql, params);
 }
 
-async function get(sql, params = []) {
+export async function get(sql, params = []) {
   const db = await getDB();
   return db.get(sql, params);
 }
 
-async function run(sql, params = []) {
+export async function run(sql, params = []) {
   const db = await getDB();
   return db.run(sql, params);
 }
 
-async function exec(sql) {
+export async function exec(sql) {
   const db = await getDB();
   return db.exec(sql);
 }
 
 // Aliases expected by existing controllers
-// 'query' historically used in your controllers to fetch multiple rows
-async function query(sql, params = []) {
+export async function query(sql, params = []) {
   return all(sql, params);
 }
-// optional alias for single-row reads
-async function queryOne(sql, params = []) {
+export async function queryOne(sql, params = []) {
   return get(sql, params);
 }
-
-export default initDB;
-export { getDB, all, get, run, exec, query, queryOne };
