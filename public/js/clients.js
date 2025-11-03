@@ -3,6 +3,23 @@
 // Assumes there is a container with id="clients-table" and a create form triggers showCreateClientForm()
 
 // Utility
+// compatibility: provide loadClients() for other modules that import it
+export async function loadClients() {
+  try {
+    const res = await fetch('/api/clients');
+    if (!res.ok) {
+      console.warn('loadClients: fetch /api/clients returned', res.status);
+      return [];
+    }
+    const rows = await res.json();
+    return Array.isArray(rows) ? rows : [];
+  } catch (err) {
+    console.error('loadClients error:', err);
+    return [];
+  }
+}
+
+
 function el(id) { return document.getElementById(id); }
 function sanitize(s) { return s == null ? '' : String(s); }
 
