@@ -2,10 +2,14 @@
 // - loadDeductions(): list for table
 // - window.showDeductionForm(): render create form with Employee dropdown + clear after submit
 // Local helper to avoid name clashes
+
 async function fetchEmployeesList() {
   try {
     const r = await fetch('/api/employees');
-    if (!r.ok) throw new Error(await r.text());
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      throw new Error(`HTTP ${r.status} ${r.statusText} ${txt}`);
+    }
     const list = await r.json();
     return Array.isArray(list) ? list : [];
   } catch (e) {
@@ -40,11 +44,27 @@ async function populateEmployeeDropdown(selectId) {
   const sel = document.getElementById(selectId);
   if (!sel) return;
   try {
-    const emps = (typeof loadEmployees === 'function') ? await loadEmployees() : [];
+    // Try a few ways to get employees: first a global loader if present, then our fetch helper
+    let emps = [];
+    if (typeof loadEmployees === 'function') {
+      try {
+        emps = await loadEmployees();
+        if (!Array.isArray(emps)) emps = [];
+      } catch (e) {
+        console.warn('loadEmployees() failed:', e);
+        emps = [];
+      }
+    }
+    if (!emps || emps.length === 0) {
+      // fallback to helper that calls /api/employees
+      emps = await fetchEmployeesList();
+    }
+
     if (!Array.isArray(emps) || emps.length === 0) {
       sel.innerHTML = '<option value="">No employees available</option>';
       return;
     }
+
     sel.innerHTML = ['<option value="">Select Employee</option>']
       .concat(emps.map(e => `<option value="${e.id}">${escapeHTML(e.name || `ID ${e.id}`)} (ID: ${e.id})</option>`))
       .join('');
@@ -133,9 +153,13 @@ window.showDeductionForm = async () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ employee_id, month, reason, amount, note })
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(`Server returned ${res.status} ${res.statusText} ${txt}`);
+      }
       alert('Deduction saved');
       form.reset();
+      if (window.showTable) window.showTable('deductions');
     } catch (err) {
       console.error('Create deduction error:', err);
       alert('Failed to save: ' + (err.message || 'Unknown error'));
@@ -147,7 +171,7 @@ window.showDeductionForm = async () => {
 
 // === EDIT DEDUCTION MODAL ===
 // Schema: id, employee_id, amount, reason, date, month
-// Uses optional employee dropdown if loadEmployees() is available.
+// Uses optional employee dropdown if loadEmployees() or fetchEmployeesList() is available.
 window.openEditDeduction = async (id) => {
   try {
     const r = await fetch(`/api/deductions/${id}`);
@@ -158,12 +182,18 @@ window.openEditDeduction = async (id) => {
     let employees = [];
     try {
       if (typeof fetchEmployeesList === 'function') {
-        const employees = await fetchEmployeesList();
+        employees = await fetchEmployeesList();
+      } else if (typeof loadEmployees === 'function') {
+        employees = await loadEmployees();
       } else {
         const rr = await fetch('/api/employees');
         if (rr.ok) employees = await rr.json();
       }
-    } catch (_) {}
+      if (!Array.isArray(employees)) employees = [];
+    } catch (err) {
+      console.warn('Failed to load employees for edit modal:', err);
+      employees = [];
+    }
 
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:9999';
@@ -172,7 +202,7 @@ window.openEditDeduction = async (id) => {
 
     const empSelect = (Array.isArray(employees) && employees.length)
       ? `<select id="ded_employee_id">
-           ${employees.map(e => `<option value="${e.id}" ${Number(e.id)===Number(d.employee_id)?'selected':''}>${(e.name||'Employee')} (ID: ${e.id})</option>`).join('')}
+           ${employees.map(e => `<option value="${e.id}" ${Number(e.id)===Number(d.employee_id)?'selected':''}>${escapeHTML(e.name||'Employee')} (ID: ${e.id})</option>`).join('')}
          </select>`
       : `<input type="number" id="ded_employee_id" value="${d.employee_id ?? ''}" placeholder="Employee ID">`;
 
@@ -202,10 +232,8 @@ window.openEditDeduction = async (id) => {
 
     document.getElementById('dedEditForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const employee_id = (() => {
-        const el = document.getElementById('ded_employee_id');
-        return el.tagName === 'SELECT' ? parseInt(el.value,10) : parseInt(el.value,10);
-      })();
+      const el = document.getElementById('ded_employee_id');
+      const employee_id = el && el.tagName === 'SELECT' ? parseInt(el.value,10) : parseInt(el.value,10);
       const payload = {
         employee_id: Number.isFinite(employee_id) ? employee_id : d.employee_id,
         amount: parseFloat(document.getElementById('ded_amount').value || 0) || 0,
