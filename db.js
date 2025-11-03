@@ -5,7 +5,7 @@
 // - ensures core tables + idempotent migrations
 //
 // Usage:
-//   import initDB, { getDB, all, get, run, exec } from './db.js';
+//   import initDB, { getDB, all, get, run, exec, query, queryOne } from './db.js';
 //   await initDB(); // at server startup
 
 import fs from 'fs';
@@ -119,9 +119,9 @@ async function createCoreTables(db) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       resource TEXT,
       resource_id INTEGER,
-      action TEXT,         -- e.g. 'edit' or 'delete'
-      payload TEXT,        -- JSON string with requested changes
-      approver_id INTEGER, -- user id of approver (added by migration if missing)
+      action TEXT,
+      payload TEXT,
+      approver_id INTEGER,
       status TEXT DEFAULT 'pending',
       created_at TEXT
     );
@@ -154,15 +154,11 @@ async function runMigrations(db) {
     if (!clientColNames.includes('gst_number')) {
       console.log('[db] Migration: adding clients.gst_number');
       await db.exec("ALTER TABLE clients ADD COLUMN gst_number TEXT;");
-    } else {
-      // likely already exists; keep silent
     }
 
     if (!clientColNames.includes('igst')) {
       console.log('[db] Migration: adding clients.igst');
       await db.exec("ALTER TABLE clients ADD COLUMN igst REAL;");
-    } else {
-      // ok
     }
 
     // requests: ensure approver_id exists
@@ -175,7 +171,6 @@ async function runMigrations(db) {
       console.log('[db] Migration: requests.approver_id exists');
     }
 
-    // If you need to drop legacy 'address' column, do that via safe rebuild migration separately.
   } catch (merr) {
     console.warn('[db] Migration step failed (non-fatal):', merr && merr.message ? merr.message : merr);
   }
@@ -213,7 +208,6 @@ async function initDB() {
     await createCoreTables(dbInstance);
   } catch (cErr) {
     console.error('[db] Error creating core tables:', cErr && cErr.stack ? cErr.stack : cErr);
-    // continue; table creation problems will surface later
   }
 
   // Run idempotent migrations
@@ -251,5 +245,15 @@ async function exec(sql) {
   return db.exec(sql);
 }
 
+// Aliases expected by existing controllers
+// 'query' historically used in your controllers to fetch multiple rows
+async function query(sql, params = []) {
+  return all(sql, params);
+}
+// optional alias for single-row reads
+async function queryOne(sql, params = []) {
+  return get(sql, params);
+}
+
 export default initDB;
-export { getDB, all, get, run, exec };
+export { getDB, all, get, run, exec, query, queryOne };
