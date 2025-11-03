@@ -1,214 +1,176 @@
 // controllers/clients.js
+// ES module router for clients: List, Get, Create (reliable lastID fallback), Update, Delete
 import express from 'express';
-import { query, run } from '../db.js';
+import { run, query } from '../db.js'; // adjust path if your db helpers are elsewhere
 
 const router = express.Router();
 
-// Get all clients (include categories summary)
-router.get('/', async (_req, res) => {
+// Utility to safely parse numbers
+const toNumber = (v, def = 0) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : def;
+};
+
+// GET /api/clients  -> list all clients
+router.get('/', async (req, res) => {
   try {
-    const clients = await query('SELECT * FROM clients ORDER BY id DESC');
-    for (const client of clients) {
-      try {
-        const cats = await query(
-          'SELECT category, monthly_rate FROM client_categories WHERE client_id = ?',
-          [client.id]
-        );
-        client.categories = cats.length
-          ? cats.map(c => `${c.category}: ₹${c.monthly_rate}`).join(', ')
-          : 'No categories';
-      } catch (e) {
-        client.categories = 'No categories';
-      }
-    }
-    res.json(clients);
+    // Select explicit columns and alias address_line1 as address for backward compat.
+    const rows = await query(`
+      SELECT
+        id, name,
+        address_line1,
+        address_line1 AS address,
+        address_line2,
+        contact, telephone, email,
+        cgst, sgst, gst_number, igst,
+        po_dated, state, district, monthly_rate
+      FROM clients
+      ORDER BY id DESC
+    `);
+    res.json(rows || []);
   } catch (err) {
-    console.error('Error fetching clients:', err);
-    res.status(500).json({ error: err.message || 'Server error' });
+    console.error('[clients.GET] error:', err);
+    res.status(500).json({ error: 'Failed to load clients' });
   }
 });
 
-// Create client (admin/accountant)
-router.post('/', async (req, res) => {
-  try {
-    if (!req.session?.user || !['admin', 'accountant'].includes(req.session.user.role)) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-
-    const {
-      name,
-      address_line1,
-      address_line2,
-      po_dated,
-      state,
-      district,
-      telephone,
-      email,
-      gst_number,
-      cgst = 0,
-      sgst = 0,
-      igst = 0
-    } = req.body || {};
-
-    if (!name || !String(name).trim()) {
-      return res.status(400).json({ error: 'Client name is required' });
-    }
-
-    // Use parameterized insert
-    const sql = `INSERT INTO clients
-      (name, address_line1, address_line2, po_dated, state, district, telephone, email, gst_number, cgst, sgst, igst)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-
-    const params = [
-      String(name).trim(),
-      address_line1 || null,
-      address_line2 || null,
-      po_dated || null,
-      state || null,
-      district || null,
-      telephone || null,
-      email || null,
-      gst_number || null,
-      Number(cgst) || 0,
-      Number(sgst) || 0,
-      (typeof igst !== 'undefined' && igst !== null && igst !== '') ? Number(igst) : null
-    ];
-
-    const insertResult = await run(sql, params);
-
-    // run wrappers differ: try common return shapes
-    const insertId = insertResult?.lastID ?? insertResult?.insertId ?? insertResult?.id ?? null;
-
-    if (!insertId) {
-      // best-effort: if no insertId, try to find by unique fields (name + telephone + email) as a fallback
-      const fallbackRows = await query(
-        `SELECT * FROM clients WHERE name = ? AND (telephone = ? OR email = ?) ORDER BY id DESC LIMIT 1`,
-        [String(name).trim(), telephone || '', email || '']
-      );
-      if (fallbackRows && fallbackRows.length) {
-        return res.status(201).json(fallbackRows[0]);
-      }
-      // otherwise return success without object
-      return res.status(201).json({ ok: true });
-    }
-
-    const rows = await query('SELECT * FROM clients WHERE id = ?', [insertId]);
-    return res.status(201).json(rows[0] || { ok: true, id: insertId });
-  } catch (err) {
-    console.error('Create client error:', err);
-    return res.status(500).json({ error: err.message || 'Server error' });
-  }
-});
-
-// Add category to client (admin/accountant)
-router.post('/:id/categories', async (req, res) => {
-  try {
-    if (!req.session?.user || !['admin', 'accountant'].includes(req.session.user.role)) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-    const id = Number(req.params.id);
-    const { category, monthly_rate } = req.body || {};
-    if (!id || !category || typeof monthly_rate === 'undefined') {
-      return res.status(400).json({ error: 'Client ID, category and monthly_rate are required' });
-    }
-    await run(
-      'INSERT INTO client_categories (client_id, category, monthly_rate) VALUES (?, ?, ?)',
-      [id, String(category).trim(), Number(monthly_rate)]
-    );
-    res.json({ ok: true });
-  } catch (err) {
-    console.error('Add category error:', err);
-    res.status(500).json({ error: err.message || 'Server error' });
-  }
-});
-
-// Get one client by ID
+// GET /api/clients/:id  -> get single client
 router.get('/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
-    const rows = await query('SELECT * FROM clients WHERE id = ?', [id]);
-    if (!rows || !rows.length) return res.status(404).json({ error: 'Client not found' });
+    const rows = await query(`
+      SELECT
+        id, name,
+        address_line1,
+        address_line1 AS address,
+        address_line2,
+        contact, telephone, email,
+        cgst, sgst, gst_number, igst,
+        po_dated, state, district, monthly_rate
+      FROM clients WHERE id = ?
+    `, [id]);
+    if (!rows || rows.length === 0) return res.status(404).json({ error: 'Not found' });
     res.json(rows[0]);
   } catch (err) {
-    console.error('GET /clients/:id error:', err);
-    res.status(500).json({ error: err.message || 'Server error' });
+    console.error('[clients.GET:id] error:', err);
+    res.status(500).json({ error: 'Failed to load client' });
   }
 });
 
-// Update client (admin/accountant)
+// POST /api/clients -> create client (returns full created row)
+router.post('/', async (req, res) => {
+  try {
+    const body = req.body || {};
+    // read new field names (address_line1 etc.)
+    const name = (body.name || '').trim();
+    const address_line1 = (body.address_line1 || '').trim();
+    const address_line2 = (body.address_line2 || '').trim();
+    const contact = (body.contact || '').trim();
+    const telephone = (body.telephone || '').trim();
+    const email = (body.email || '').trim();
+    const cgst = toNumber(body.cgst, 0);
+    const sgst = toNumber(body.sgst, 0);
+    const gst_number = (body.gst_number || '').trim();
+    const igst = toNumber(body.igst, 0);
+    const po_dated = (body.po_dated || '').trim();
+    const state = (body.state || '').trim();
+    const district = (body.district || '').trim();
+    const monthly_rate = toNumber(body.monthly_rate, 0);
+
+    console.log('[clients.POST] creating client by user:', req.session?.user?.username, req.session?.user?.role);
+    const sql = `
+      INSERT INTO clients
+        (name, address_line1, address_line2, contact, telephone, email, cgst, sgst, gst_number, igst, po_dated, state, district, monthly_rate)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `;
+    const params = [name, address_line1, address_line2, contact, telephone, email, cgst, sgst, gst_number, igst, po_dated, state, district, monthly_rate];
+
+    const insertResult = await run(sql, params);
+    console.log('[clients.POST] raw insertResult:', insertResult);
+
+    // Robust fallback to obtain last inserted id
+    let insertId = insertResult?.lastID ?? insertResult?.insertId ?? insertResult?.id ?? null;
+    try {
+      if (!insertId) {
+        const ridRows = await query('SELECT last_insert_rowid() as id');
+        if (Array.isArray(ridRows) && ridRows.length) insertId = ridRows[0].id;
+        console.log('[clients.POST] last_insert_rowid fallback returned:', insertId);
+      }
+    } catch (e) {
+      console.warn('[clients.POST] last_insert_rowid query failed:', e && e.message ? e.message : e);
+    }
+
+    if (!insertId) {
+      // final fallback: find by unique combo (name + telephone + email)
+      const fallbackRows = await query(
+        `SELECT * FROM clients WHERE name = ? AND (telephone = ? OR email = ?) ORDER BY id DESC LIMIT 1`,
+        [name, telephone || '', email || '']
+      );
+      if (fallbackRows && fallbackRows.length) {
+        console.log('[clients.POST] returning fallback row by unique fields id=', fallbackRows[0].id);
+        return res.status(201).json(fallbackRows[0]);
+      }
+      // still nothing — respond with generic success (rare)
+      console.warn('[clients.POST] Could not resolve insertId; returning generic ok');
+      return res.status(201).json({ ok: true });
+    }
+
+    // retrieve the created row and return it
+    const createdRows = await query('SELECT id, name, address_line1, address_line1 AS address, address_line2, contact, telephone, email, cgst, sgst, gst_number, igst, po_dated, state, district, monthly_rate FROM clients WHERE id = ?', [insertId]);
+    if (!createdRows || createdRows.length === 0) return res.status(201).json({ ok: true });
+    console.log('[clients.POST] created client row returned id=', insertId);
+    return res.status(201).json(createdRows[0]);
+  } catch (err) {
+    console.error('[clients.POST] error:', err);
+    res.status(500).json({ error: 'Failed to create client' });
+  }
+});
+
+// PUT /api/clients/:id -> update client
 router.put('/:id', async (req, res) => {
   try {
-    if (!req.session?.user || !['admin', 'accountant'].includes(req.session.user.role)) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
     const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+    const body = req.body || {};
+    const name = (body.name || '').trim();
+    const address_line1 = (body.address_line1 || '').trim();
+    const address_line2 = (body.address_line2 || '').trim();
+    const contact = (body.contact || '').trim();
+    const telephone = (body.telephone || '').trim();
+    const email = (body.email || '').trim();
+    const cgst = toNumber(body.cgst, 0);
+    const sgst = toNumber(body.sgst, 0);
+    const gst_number = (body.gst_number || '').trim();
+    const igst = toNumber(body.igst, 0);
+    const po_dated = (body.po_dated || '').trim();
+    const state = (body.state || '').trim();
+    const district = (body.district || '').trim();
+    const monthly_rate = toNumber(body.monthly_rate, 0);
 
-    const currentRows = await query('SELECT * FROM clients WHERE id = ?', [id]);
-    if (!currentRows || !currentRows.length) return res.status(404).json({ error: 'Client not found' });
-    const current = currentRows[0];
-
-    const {
-      name = current.name,
-      address_line1 = current.address_line1,
-      address_line2 = current.address_line2,
-      po_dated = current.po_dated,
-      state = current.state,
-      district = current.district,
-      telephone = current.telephone,
-      email = current.email,
-      gst_number = current.gst_number,
-      cgst = current.cgst,
-      sgst = current.sgst,
-      igst = current.igst
-    } = req.body || {};
-
-    await run(
-      `UPDATE clients
-         SET name = ?, address_line1 = ?, address_line2 = ?, po_dated = ?,
-             state = ?, district = ?, telephone = ?, email = ?, gst_number = ?, cgst = ?, sgst = ?, igst = ?
-       WHERE id = ?`,
-      [
-        String(name).trim(),
-        (address_line1 || null),
-        (address_line2 || null),
-        (po_dated || null),
-        (state || null),
-        (district || null),
-        (telephone || null),
-        (email || null),
-        gst_number || null,
-        Number(cgst) || 0,
-        Number(sgst) || 0,
-        (typeof igst !== 'undefined' && igst !== null && igst !== '') ? Number(igst) : null,
-        id
-      ]
-    );
-
-    const rows = await query('SELECT * FROM clients WHERE id = ?', [id]);
-    res.json(rows[0]);
+    const sql = `
+      UPDATE clients SET
+        name = ?, address_line1 = ?, address_line2 = ?, contact = ?,
+        telephone = ?, email = ?, cgst = ?, sgst = ?, gst_number = ?, igst = ?,
+        po_dated = ?, state = ?, district = ?, monthly_rate = ?
+      WHERE id = ?
+    `;
+    await run(sql, [name, address_line1, address_line2, contact, telephone, email, cgst, sgst, gst_number, igst, po_dated, state, district, monthly_rate, id]);
+    const rows = await query('SELECT id, name, address_line1, address_line1 AS address, address_line2, contact, telephone, email, cgst, sgst, gst_number, igst, po_dated, state, district, monthly_rate FROM clients WHERE id = ?', [id]);
+    res.json(rows[0] || { ok: true });
   } catch (err) {
-    console.error('PUT /clients/:id error:', err);
-    res.status(500).json({ error: err.message || 'Server error' });
+    console.error('[clients.PUT] error:', err);
+    res.status(500).json({ error: 'Failed to update client' });
   }
 });
 
-// Delete client (admin/accountant)
+// DELETE /api/clients/:id -> remove client
 router.delete('/:id', async (req, res) => {
   try {
-    if (!req.session?.user || !['admin', 'accountant'].includes(req.session.user.role)) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
     const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
-
     await run('DELETE FROM clients WHERE id = ?', [id]);
-    await run('DELETE FROM client_categories WHERE client_id = ?', [id]);
     res.json({ ok: true });
   } catch (err) {
-    console.error('DELETE /clients/:id error:', err);
-    res.status(500).json({ error: err.message || 'Server error' });
+    console.error('[clients.DELETE] error:', err);
+    res.status(500).json({ error: 'Failed to delete client' });
   }
 });
 
