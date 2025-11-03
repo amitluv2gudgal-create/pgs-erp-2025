@@ -8,6 +8,7 @@
 //   default initDB()
 //   getDB, all, get, run, exec, query, queryOne
 //   DB_PATH, DEFAULT_DB
+//   dbModule (compatibility bundle)
 
 import fs from 'fs';
 import path from 'path';
@@ -246,3 +247,17 @@ export async function query(sql, params = []) {
 export async function queryOne(sql, params = []) {
   return get(sql, params);
 }
+
+// Compatibility bundle for server.js or other modules that import dbModule
+export const dbModule = {
+  initDB,
+  getDB,
+  all,
+  get,
+  run,
+  exec,
+  query,
+  queryOne,
+  DB_PATH,
+  DEFAULT_DB
+};
