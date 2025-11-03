@@ -3,12 +3,14 @@
 // - honors process.env.DB_PATH
 // - auto-creates parent dir
 // - ensures core tables + idempotent migrations
+// - provides dropLegacyClientAddressColumn() to safely remove legacy 'address' column
 //
 // Exports:
 //   default initDB()
 //   getDB, all, get, run, exec, query, queryOne
 //   DB_PATH, DEFAULT_DB
-//   dbModule (compatibility bundle)
+//   dbModule
+//   dropLegacyClientAddressColumn
 
 import fs from 'fs';
 import path from 'path';
@@ -173,6 +175,102 @@ async function runMigrations(db) {
   }
 }
 
+/**
+ * Safely drop legacy 'address' column from clients table.
+ * Because SQLite doesn't support DROP COLUMN directly across all versions,
+ * this function:
+ *  - checks if 'address' column exists
+ *  - if yes, creates clients_new with desired schema,
+ *  - copies data mapping address -> address_line1 when address_line1 is null,
+ *  - drops old table and renames clients_new to clients.
+ * Idempotent: if 'address' doesn't exist, it's a no-op.
+ */
+export async function dropLegacyClientAddressColumn(db) {
+  // db param optional - if not provided, use shared instance
+  const _db = db || (await getDB());
+  try {
+    const cols = await _db.all("PRAGMA table_info('clients');");
+    const colNames = (cols || []).map(c => c.name);
+    if (!colNames.includes('address')) {
+      console.log('[db] dropLegacyClientAddressColumn: no legacy address column found (no-op)');
+      return { ok: true, message: 'no-op' };
+    }
+
+    console.log('[db] dropLegacyClientAddressColumn: legacy address column found — performing safe rebuild');
+
+    // create new table with desired schema
+    await _db.exec(`
+      CREATE TABLE IF NOT EXISTS clients_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        address_line1 TEXT,
+        address_line2 TEXT,
+        po_dated TEXT,
+        state TEXT,
+        district TEXT,
+        contact TEXT,
+        telephone TEXT,
+        email TEXT,
+        gst_number TEXT,
+        cgst REAL,
+        sgst REAL,
+        igst REAL,
+        monthly_rate REAL
+      );
+    `);
+
+    // Copy data:
+    // - If address_line1 is NULL or empty, use legacy 'address' column as address_line1.
+    // - If monthly_rate doesn't exist in old table, COALESCE will yield NULL (fine).
+    // Use column list to avoid errors if some columns are missing.
+    const hasMonthlyRate = colNames.includes('monthly_rate');
+    const hasCgst = colNames.includes('cgst');
+    const hasSgst = colNames.includes('sgst');
+
+    // Build safe select mapping depending on existing columns
+    const selectCols = [
+      'id',
+      'name',
+      // fill address_line1 from address when address_line1 empty
+      "CASE WHEN (address_line1 IS NULL OR TRIM(address_line1) = '') THEN address ELSE address_line1 END AS address_line1",
+      'address_line2',
+      'po_dated',
+      'state',
+      'district',
+      'contact',
+      'telephone',
+      'email',
+      // gst_number may or may not exist; use COALESCE to keep robust
+      'COALESCE(gst_number, NULL) AS gst_number',
+      hasCgst ? 'COALESCE(cgst, NULL) AS cgst' : 'NULL AS cgst',
+      hasSgst ? 'COALESCE(sgst, NULL) AS sgst' : 'NULL AS sgst',
+      'COALESCE(igst, NULL) AS igst',
+      hasMonthlyRate ? 'COALESCE(monthly_rate, NULL) AS monthly_rate' : 'NULL AS monthly_rate'
+    ].join(', ');
+
+    const insertSQL = `
+      INSERT INTO clients_new (id, name, address_line1, address_line2, po_dated, state, district, contact, telephone, email, gst_number, cgst, sgst, igst, monthly_rate)
+      SELECT ${selectCols}
+      FROM clients;
+    `;
+
+    await _db.exec('BEGIN TRANSACTION;');
+    await _db.exec(insertSQL);
+    await _db.exec('DROP TABLE clients;');
+    await _db.exec('ALTER TABLE clients_new RENAME TO clients;');
+    await _db.exec('COMMIT;');
+
+    console.log('[db] dropLegacyClientAddressColumn: success — legacy column removed');
+    return { ok: true, message: 'dropped address column' };
+  } catch (err) {
+    try {
+      await _db.exec('ROLLBACK;');
+    } catch (e) {/* ignore */}
+    console.error('[db] dropLegacyClientAddressColumn failed:', err && err.stack ? err.stack : err);
+    throw err;
+  }
+}
+
 export async function initDB() {
   if (dbInstance) return dbInstance;
 
@@ -204,7 +302,16 @@ export async function initDB() {
     console.error('[db] Error creating core tables:', cErr && cErr.stack ? cErr.stack : cErr);
   }
 
+  // Run migrations first (adds monthly_rate etc.)
   await runMigrations(dbInstance);
+
+  // Attempt to drop legacy address column if present (idempotent)
+  try {
+    await dropLegacyClientAddressColumn(dbInstance);
+  } catch (e) {
+    // warn and continue — not fatal
+    console.warn('[db] dropLegacyClientAddressColumn encountered an issue (non-fatal):', e && e.message ? e.message : e);
+  }
 
   console.log('[db] initialization completed');
   return dbInstance;
@@ -259,5 +366,6 @@ export const dbModule = {
   query,
   queryOne,
   DB_PATH,
-  DEFAULT_DB
+  DEFAULT_DB,
+  dropLegacyClientAddressColumn
 };
