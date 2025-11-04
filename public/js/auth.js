@@ -1,96 +1,135 @@
 // public/js/auth.js
-// Robust login/logout wiring: finds existing buttons or creates a minimal UI if not present.
-// Uses credentials: 'include' and logs full response for debugging.
+// Attach to existing login form if present. Otherwise attach to existing buttons/inputs.
+// Only create fallback if nothing exists. Uses credentials: 'include' and logs response for debugging.
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Helper to create a minimal login area if not present in DOM
-  function makeLoginArea() {
-    if (document.getElementById('loginArea')) return document.getElementById('loginArea');
+  // helper to do login fetch
+  async function doLogin(username, password, loginMsgEl) {
+    if (loginMsgEl) loginMsgEl.textContent = 'Logging in...';
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
 
+      const body = await res.json().catch(() => ({}));
+      console.log('LOGIN RESPONSE', { status: res.status, headers: Object.fromEntries(res.headers.entries()), body });
+
+      if (res.ok) {
+        if (loginMsgEl) loginMsgEl.textContent = 'Login successful';
+        if (typeof refreshUserDisplay === 'function') refreshUserDisplay();
+        if (typeof loadClients === 'function') loadClients();
+      } else {
+        const err = body?.error || body?.message || `HTTP ${res.status}`;
+        if (loginMsgEl) loginMsgEl.textContent = 'Login failed: ' + err;
+        console.warn('Login failed:', err, body);
+      }
+    } catch (err) {
+      console.error('Login network error', err);
+      if (loginMsgEl) loginMsgEl.textContent = 'Network error';
+    }
+    setTimeout(() => { if (loginMsgEl) loginMsgEl.textContent = ''; }, 3500);
+  }
+
+  // 1) Preferred: existing <form id="loginForm"> -> use its submit
+  const loginForm = document.getElementById('loginForm');
+  if (loginForm) {
+    // If there's an element named loginMsg in the form, use it; else create small inline span
+    let loginMsg = loginForm.querySelector('#loginMsg');
+    if (!loginMsg) {
+      loginMsg = document.createElement('span');
+      loginMsg.id = 'loginMsg';
+      loginMsg.style.marginLeft = '.6rem';
+      loginForm.appendChild(loginMsg);
+    }
+
+    loginForm.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const username = (loginForm.querySelector('#username') || loginForm.querySelector('input[name="username"]'))?.value?.trim() || '';
+      const password = (loginForm.querySelector('#password') || loginForm.querySelector('input[name="password"]'))?.value || '';
+      doLogin(username, password, loginMsg);
+    });
+
+    console.log('auth.js: attached to existing #loginForm');
+    return; // done — do not create fallback or attach other handlers
+  }
+
+  // 2) If no form, try to find existing button(s) and inputs by ids
+  const usernameInput = document.getElementById('username');
+  const passwordInput = document.getElementById('password');
+  const loginBtn = document.getElementById('loginBtn');
+  const logoutBtn = document.getElementById('logoutBtn');
+
+  if (loginBtn && usernameInput && passwordInput) {
+    const loginMsgEl = document.getElementById('loginMsg') || null;
+    loginBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      doLogin(usernameInput.value.trim(), passwordInput.value, loginMsgEl);
+    });
+    console.log('auth.js: attached to existing #loginBtn');
+  } else if (loginBtn && (!usernameInput || !passwordInput)) {
+    console.warn('auth.js: found loginBtn but username/password inputs missing; creating fallback inputs next to button.');
+    // create fallback inputs next to loginBtn
     const wrapper = document.createElement('div');
-    wrapper.id = 'loginArea';
+    wrapper.style.display = 'inline-block';
+    wrapper.style.marginLeft = '8px';
+    wrapper.innerHTML = `
+      <input id="fallback-username" placeholder="username" style="margin-right:6px" value="accountant" />
+      <input id="fallback-password" placeholder="password" type="password" style="margin-right:6px" value="rohit123" />
+      <span id="loginMsg" style="margin-left:.6rem"></span>
+    `;
+    loginBtn.parentNode.insertBefore(wrapper, loginBtn.nextSibling);
+    const fu = document.getElementById('fallback-username');
+    const fp = document.getElementById('fallback-password');
+    loginBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      doLogin(fu.value.trim(), fp.value, document.getElementById('loginMsg'));
+    });
+    console.log('auth.js: created fallback inputs near existing loginBtn');
+  } else if (!loginBtn && !usernameInput && !passwordInput) {
+    // 3) Nothing found — create an isolated fallback area (use unique ids so no collisions)
+    console.warn('auth.js: No login form/buttons found — injecting fallback login area (unique ids).');
+    const wrapper = document.createElement('div');
+    wrapper.id = 'auth-fallback-area';
     wrapper.style.border = '1px solid #ddd';
     wrapper.style.padding = '8px';
     wrapper.style.margin = '8px 0';
     wrapper.innerHTML = `
       <strong>Quick Login (injected)</strong><br/>
-      <input id="username" placeholder="username" style="margin-right:6px" value="accountant" />
-      <input id="password" placeholder="password" type="password" style="margin-right:6px" value="rohit123" />
-      <button id="loginBtn">Login</button>
-      <button id="logoutBtn" style="display:none">Logout</button>
+      <input id="fallback-username" placeholder="username" style="margin-right:6px" value="accountant" />
+      <input id="fallback-password" placeholder="password" type="password" style="margin-right:6px" value="rohit123" />
+      <button id="fallback-loginBtn">Login</button>
+      <button id="fallback-logoutBtn" style="display:none">Logout</button>
       <span id="loginMsg" style="margin-left:.6rem"></span>
     `;
-    // insert at top of body so it's visible
     document.body.insertBefore(wrapper, document.body.firstChild);
-    return wrapper;
-  }
 
-  // Ensure we have a login area and buttons
-  const loginArea = document.getElementById('loginArea') || makeLoginArea();
-  const loginBtn = document.getElementById('loginBtn');
-  const logoutBtn = document.getElementById('logoutBtn');
-
-  if (!loginBtn) {
-    console.warn('auth.js: loginBtn not found in DOM — created a fallback login area.');
-  } else {
-    // found existing loginBtn
-  }
-
-  if (!logoutBtn) {
-    console.warn('auth.js: logoutBtn not found in DOM — created a fallback logout button.');
-  }
-
-  // Attach login handler
-  if (loginBtn) {
-    loginBtn.addEventListener('click', async () => {
-      const usernameEl = document.getElementById('username');
-      const passwordEl = document.getElementById('password');
-      const loginMsg = document.getElementById('loginMsg');
-
-      const username = usernameEl ? usernameEl.value.trim() : '';
-      const password = passwordEl ? passwordEl.value : '';
-
-      if (loginMsg) loginMsg.textContent = 'Logging in...';
-
-      try {
-        const res = await fetch('/api/auth/login', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password })
-        });
-
-        // attempt to parse JSON body (may fail)
-        const body = await res.json().catch(() => ({}));
-        console.log('LOGIN RESPONSE', { status: res.status, headers: Object.fromEntries(res.headers.entries()), body });
-
-        if (res.ok) {
-          if (loginMsg) loginMsg.textContent = 'Login successful';
-          // attempt to refresh UI (if function present)
-          if (typeof refreshUserDisplay === 'function') refreshUserDisplay();
-          // auto-load clients if function available
-          if (typeof loadClients === 'function') loadClients();
-          // show logout button if present
-          const lb = document.getElementById('logoutBtn');
-          if (lb) lb.style.display = 'inline-block';
-        } else {
-          const err = body?.error || body?.message || `HTTP ${res.status}`;
-          if (loginMsg) loginMsg.textContent = 'Login failed: ' + err;
-          console.warn('Login failed:', err, body);
-        }
-      } catch (err) {
-        console.error('Login network error', err);
-        if (document.getElementById('loginMsg')) document.getElementById('loginMsg').textContent = 'Network error';
-      }
-
-      setTimeout(() => {
-        const lm = document.getElementById('loginMsg');
-        if (lm) lm.textContent = '';
-      }, 3500);
+    document.getElementById('fallback-loginBtn').addEventListener('click', (ev) => {
+      ev.preventDefault();
+      const u = document.getElementById('fallback-username').value.trim();
+      const p = document.getElementById('fallback-password').value;
+      doLogin(u, p, document.getElementById('loginMsg'));
     });
+  } else {
+    // partial case: username/password inputs exist but no button — create a small login button
+    if ((usernameInput || passwordInput) && !loginBtn) {
+      const btn = document.createElement('button');
+      btn.id = 'loginBtn';
+      btn.textContent = 'Login';
+      (passwordInput || document.body).insertAdjacentElement('afterend', btn);
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        const u = (usernameInput?.value || '').trim();
+        const p = (passwordInput?.value || '');
+        doLogin(u, p, document.getElementById('loginMsg'));
+      });
+      console.log('auth.js: created loginBtn because inputs existed but button did not');
+    }
   }
 
-  // Attach logout handler
+  // attach logout if present
   if (logoutBtn) {
     logoutBtn.addEventListener('click', async () => {
       try {
@@ -98,11 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const body = await res.json().catch(() => ({}));
         console.log('LOGOUT RESPONSE', { status: res.status, body });
         if (res.ok) {
-          // hide logout button if present
-          const lb = document.getElementById('logoutBtn');
-          if (lb) lb.style.display = 'none';
           if (typeof refreshUserDisplay === 'function') refreshUserDisplay();
-          if (document.getElementById('clientsTable')) document.getElementById('clientsTable').innerHTML = '';
         } else {
           alert('Logout failed: ' + (body?.error || res.status));
         }
@@ -111,7 +146,4 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
-
-  // On load try refresh user display if available
-  if (typeof refreshUserDisplay === 'function') refreshUserDisplay();
 });
