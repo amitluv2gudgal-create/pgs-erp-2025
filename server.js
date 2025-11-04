@@ -1,104 +1,90 @@
 // server.js
 import express from 'express';
-import cors from 'cors';
 import session from 'express-session';
-import SQLiteStoreFactory from 'connect-sqlite3';
+import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
+
+import { initDB, DB_PATH } from './db.js';
+
+// Route modules (pure routers — must NOT touch DB at import time)
+import authRoutes from './controllers/auth.js';
+import clientRoutes from './controllers/clients.js';
+import employeeRoutes from './controllers/employees.js';
+import attendanceRoutes from './controllers/attendances.js';
+import deductionRoutes from './controllers/deductions.js';
+import invoiceRoutes from './controllers/invoices.js';
+import salaryRoutes from './controllers/salaries.js';
+import requestRoutes from './controllers/requests.js';
+import securitySupervisorRoutes from './controllers/security_supervisors.js';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// --- CORS config (allow your dev origin + deployed origin) ---
-const allowedOrigins = [
-  'http://localhost:3000',                     // frontend dev (change if different)
-  'http://localhost:8080',                     // alternate local front-end
-  'https://pgs-erp-2025-1.onrender.com'        // deployed front-end (change if different)
-];
+// Behind Render's proxy, this is REQUIRED for secure cookies to be set
+app.set('trust proxy', 1);
 
-// allow null origin (curl, server-to-server)
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin) return cb(null, true);
-    if (allowedOrigins.includes(origin)) return cb(null, true);
-    return cb(new Error('CORS not allowed'), false);
-  },
-  credentials: true
-}));
+const { SESSION_SECRET, NODE_ENV } = process.env;
+const PORT = process.env.PORT || 3000;
 
-// --- sessions ---
-const SQLiteStore = SQLiteStoreFactory(session);
-const NODE_ENV = process.env.NODE_ENV || 'development';
-const PORT = process.env.PORT || 8080;
-const SESSION_SECRET = process.env.SESSION_SECRET || 'please-change-this-secret';
+if (!SESSION_SECRET) {
+  console.error('Missing SESSION_SECRET');
+  process.exit(1);
+}
+
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.static('public'));
 
 app.use(session({
-  store: new SQLiteStore({ db: 'sessions.sqlite', dir: './data', concurrentDB: true }),
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
-    maxAge: 24 * 60 * 60 * 1000,
-    secure: NODE_ENV === 'production',                       // secure in production (HTTPS)
-    sameSite: NODE_ENV === 'production' ? 'none' : 'lax'    // none so cross-site cookies work in prod
-  }
+   httpOnly: true,                 // not readable by JS
+   sameSite: 'lax',                // works across normal GET navigations
+   secure: process.env.NODE_ENV === 'production', // set on HTTPS
+   maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+ }
 }));
 
-// serve static front-end
-app.use(express.static(path.join(__dirname, 'public')));
 
-// small health route
-app.get('/health', (req, res) => res.json({ ok: true }));
+// Only protect /api; allow /api/auth/login and /api/auth/current-user
+const requireAuth = (req, res, next) => {
+  if (req.path === '/auth/login' || req.path === '/auth/current-user') return next();
+  if (!req.session.user) return res.status(401).json({ error: 'Unauthorized' });
+  next();
+};
 
-// import controllers (note: use named import for clients)
-import authRouter from './controllers/auth.js';
-import { getClients, createClient } from './controllers/clients.js';
+async function bootstrap() {
+  // 1) Initialize DB (creates tables + seeds admin)
+  await initDB();
+  console.log('[db] Ready at:', DB_PATH);
 
-// mount auth router under /api/auth
-app.use('/api/auth', authRouter);
+  // 2) Register middleware AFTER DB is ready
+  app.use('/api', requireAuth);
 
-// requireAuth middleware for /api routes except /api/auth
-function requireAuth(req, res, next) {
-  // allow login routes
-  if (req.path.startsWith('/auth')) return next();
+  // 3) Register routes (routers must not run queries at import time)
+  app.use('/api/auth', authRoutes);
+  app.use('/api/clients', clientRoutes);
+  app.use('/api/employees', employeeRoutes);
+  app.use('/api/attendances', attendanceRoutes);
+  app.use('/api/deductions', deductionRoutes);
+  app.use('/api/invoices', invoiceRoutes);
+  app.use('/api/salaries', salaryRoutes);
+  app.use('/api/requests', requestRoutes);
+  app.use('/api/security-supervisors', securitySupervisorRoutes);
 
-  // allow public health or static assets
-  if (req.path === '/health') return next();
+  // 4) Basic pages
+  app.get('/', (req, res) => res.redirect('/login.html'));
+  app.get('/favicon.ico', (req, res) => res.status(204).end());
 
-  // all /api requests should be authenticated
-  if (req.session && req.session.user) return next();
-
-  return res.status(401).json({ error: 'Unauthorized' });
+  app.listen(PORT, () => {
+    console.log('Server running on port', PORT);
+  });
 }
-app.use('/api', requireAuth);
 
-// client endpoints
-// GET /api/clients
-app.get('/api/clients', getClients);
-// POST /api/clients
-app.post('/api/clients', createClient);
-
-// optional: current-user helper (for debug)
-app.get('/api/auth/current-user', (req, res) => {
-  res.json({ user: req.session?.user ?? null });
+bootstrap().catch((err) => {
+  console.error('Fatal startup error:', err);
+  process.exit(1);
 });
-
-// global error handler
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err && err.stack ? err.stack : err);
-  if (!res.headersSent) res.status(500).json({ error: 'Unhandled server error', message: err?.message });
-  else next(err);
-});
-
-process.on('unhandledRejection', (r) => console.error('unhandledRejection', r));
-process.on('uncaughtException', (err) => console.error('uncaughtException', err && err.stack ? err.stack : err));
-
-// start server
-app.listen(PORT, () => console.log(`PGS-ERP running on port ${PORT} (NODE_ENV=${NODE_ENV})`));

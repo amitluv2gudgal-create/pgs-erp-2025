@@ -1,198 +1,57 @@
-<!DOCTYPE html>
+!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>PGS ERP</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="css/style.css" />
-  <style>
-    /* small inline styles to keep layout tidy while you iterate */
-    body { font-family: Arial, Helvetica, sans-serif; margin: 18px; }
-    header { display:flex; gap:1rem; align-items:center; justify-content:space-between; }
-    .controls { display:flex; gap:.5rem; align-items:center; }
-    #clientsTable { margin-top: 1rem; }
-    .error { color: darkred; }
-    .table { border-collapse: collapse; width: 100%; }
-    .table th, .table td { border: 1px solid #ddd; padding: 8px; }
-    .table th { background:#f3f3f3; }
-    #loginArea input { margin-right:.4rem; }
-  </style>
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <header>
-    <h1>PGS ERP Dashboard</h1>
-    <div class="controls">
-      <div id="userDisplay" style="margin-right:1rem">Not logged in</div>
-      <button id="logoutBtn" style="display:none">Logout</button>
-    </div>
-  </header>
-
-  <main>
-    <!-- --- LOGIN AREA (for quick browser testing) --- -->
-    <section id="loginArea" aria-label="Login area">
-      <h3>Login (test)</h3>
-      <input id="username" placeholder="username" />
-      <input id="password" placeholder="password" type="password" />
-      <button id="loginBtn">Login</button>
-      <span id="loginMsg" style="margin-left:.6rem"></span>
-    </section>
-
-    <hr/>
-
-    <!-- ADMIN / ROLE SECTIONS -->
-    <section id="adminSection" style="display: none;">
-      <h3>Admin — Pending Requests</h3>
-      <ul id="requestsList"></ul>
-      <button onclick="approveSelected()">Approve Selected</button>
-
-      <h3>Create Security Supervisor</h3>
-      <form id="supervisorForm">
-        <label>Username:<input type="text" id="supervisorUsername" required></label><br>
-        <label>Site Name:<input type="text" id="supervisorSite" required></label><br>
-        <button type="submit">Create</button>
-      </form>
-      <ul id="supervisorsList"></ul>
-    </section>
-
-    <section id="accountantSection" style="display:none">
-      <h2>Accountant Actions</h2>
-      <h3>Generate Invoice</h3>
-      <select id="clientId">
-        <option value="">Select Client</option>
-      </select>
-      <input id="invoiceMonth" type="month" value="2025-09">
-      <button onclick="generateInvoice()">Generate Invoice</button>
-
-      <h3>Generate Salaries</h3>
-      <input id="salaryMonth" type="month" value="2025-09">
-      <button onclick="generateSalaries()">Generate Salaries</button>
-
-      <h3>Invoices</h3>
-      <ul id="invoicesList"></ul>
-      <h3>Salaries</h3>
-      <ul id="salariesList"></ul>
-    </section>
-
-    <section id="hrSection" style="display:none">
-      <h2>HR Actions</h2>
-      <h3>Clients</h3>
-      <ul id="clientsList"></ul>
-      <h3>Employees</h3>
-      <ul id="employeesList"></ul>
-      <h3>Attendances</h3>
-      <ul id="attendancesList"></ul>
-      <h3>Deductions</h3>
-      <ul id="deductionsList"></ul>
-    </section>
-
-    <!-- VIEW CLIENTS (mount point) -->
-    <section aria-label="Clients">
-      <h2>Clients</h2>
-      <div>
-        <button id="viewClientsBtn" onclick="loadClients()">View Clients</button>
-        <button id="refreshClientsBtn" onclick="loadClients()">Refresh</button>
-      </div>
-      <div id="clientsTable"></div>
-    </section>
-  </main>
-
-  <!-- --- External JS modules (your project JS) --- -->
-  <!-- app.js should contain your role-based UI logic. Keep it as module. -->
+  <h1>PGS ERP Dashboard</h1>
+  <button id="logoutBtn">Logout</button>
+  <div id="content"></div>
+  <div id="adminSection" style="display: none;">
+    <h3>Pending Requests</h3>
+    <ul id="requestsList"></ul>
+    <button onclick="approveSelected()">Approve Selected</button>
+  </div>
+  <div id="accountantSection" style="display:none">
+    <h2>Accountant Actions</h2>
+    <h3>Generate Invoice</h3>
+    <select id="clientId">
+      <option value="">Select Client</option>
+    </select>
+    <input id="invoiceMonth" type="month" value="2025-09">
+    <button onclick="generateInvoice()">Generate Invoice</button>
+    <h3>Generate Salaries</h3>
+    <input id="salaryMonth" type="month" value="2025-09">
+    <button onclick="generateSalaries()">Generate Salaries</button>
+    <h3>Invoices</h3>
+    <ul id="invoicesList"></ul>
+    <h3>Salaries</h3>
+    <ul id="salariesList"></ul>
+  </div>
+ 
+  <div id="adminSection" style="display: none;">
+  <h3>Create Security Supervisor</h3>
+  <form id="supervisorForm">
+    <label>Username:<input type="text" id="supervisorUsername" required></label><br>
+    <label>Site Name:<input type="text" id="supervisorSite" required></label><br>
+    <button type="submit">Create</button>
+  </form>
+  <ul id="supervisorsList"></ul>
+  </div>
+ 
+  <div id="hrSection" style="display:none">
+    <h2>HR Actions</h2>
+    <h3>Clients</h3>
+    <ul id="clientsList"></ul>
+    <h3>Employees</h3>
+    <ul id="employeesList"></ul>
+    <h3>Attendances</h3>
+    <ul id="attendancesList"></ul>
+    <h3>Deductions</h3>
+    <ul id="deductionsList"></ul>
+  </div>
   <script type="module" src="js/app.js"></script>
-  <!-- auth.js (if present) - you may have login helpers there -->
-  <script type="module" src="js/auth.js"></script>
-  <!-- clients.js — must use credentials: 'include' (we provided that code earlier) -->
-  <script type="module" src="js/clients.js"></script>
-  <!-- employees and other modules (if required) -->
-  <script type="module" src="js/employees.js"></script>
-  <script type="module" src="js/attendances.js"></script>
-  <script type="module" src="js/deductions.js"></script>
-  <script type="module" src="js/invoices.js"></script>
-  <script type="module" src="js/salaries.js"></script>
-
-  <!-- --- Small inline helper to wire login/logout display & behavior --- -->
-  <script>
-    // Inline helpers — non-invasive. Uses fetch with credentials: 'include'.
-    async function refreshUserDisplay() {
-      try {
-        const res = await fetch('/api/auth/whoami', { credentials: 'include' });
-        const body = await res.json().catch(() => ({}));
-        const user = body?.user ?? null;
-        const userDisplay = document.getElementById('userDisplay');
-        const logoutBtn = document.getElementById('logoutBtn');
-        const loginArea = document.getElementById('loginArea');
-
-        if (user) {
-          userDisplay.textContent = user.username + ' (' + (user.role || 'user') + ')';
-          logoutBtn.style.display = 'inline-block';
-          loginArea.style.display = 'none';
-          // show role sections (simple handling)
-          if (user.role === 'admin') document.getElementById('adminSection').style.display = 'block';
-          if (user.role === 'accountant') document.getElementById('accountantSection').style.display = 'block';
-          if (user.role === 'hr') document.getElementById('hrSection').style.display = 'block';
-        } else {
-          userDisplay.textContent = 'Not logged in';
-          logoutBtn.style.display = 'none';
-          loginArea.style.display = 'block';
-          document.getElementById('adminSection').style.display = 'none';
-          document.getElementById('accountantSection').style.display = 'none';
-          document.getElementById('hrSection').style.display = 'none';
-        }
-      } catch (err) {
-        console.error('Error fetching current user', err);
-      }
-    }
-
-    // login button
-    document.getElementById('loginBtn').addEventListener('click', async () => {
-      const username = document.getElementById('username').value.trim();
-      const password = document.getElementById('password').value;
-      const loginMsg = document.getElementById('loginMsg');
-      loginMsg.textContent = 'Logging in...';
-      try {
-        const res = await fetch('/api/auth/login', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password })
-        });
-        const body = await res.json().catch(() => ({}));
-        if (res.ok) {
-          loginMsg.textContent = 'Login successful';
-          await refreshUserDisplay();
-          // auto-load clients after login for convenience
-          if (typeof loadClients === 'function') loadClients();
-        } else {
-          loginMsg.textContent = 'Login failed: ' + (body?.error || res.status);
-        }
-      } catch (err) {
-        loginMsg.textContent = 'Network error';
-        console.error('Login error', err);
-      }
-      setTimeout(()=> { document.getElementById('loginMsg').textContent = ''; }, 3000);
-    });
-
-    // logout button
-    document.getElementById('logoutBtn').addEventListener('click', async () => {
-      try {
-        const res = await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
-        const body = await res.json().catch(()=>({}));
-        if (res.ok) {
-          alert('Logged out');
-          await refreshUserDisplay();
-          document.getElementById('clientsTable').innerHTML = '';
-        } else {
-          alert('Logout failed: ' + (body?.error || res.status));
-        }
-      } catch (err) {
-        console.error('Logout error', err);
-      }
-    });
-
-    // run once on load
-    window.addEventListener('load', () => {
-      refreshUserDisplay();
-    });
-  </script>
 </body>
 </html>

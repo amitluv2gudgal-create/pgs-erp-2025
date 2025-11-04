@@ -2,12 +2,11 @@
 import PDFDocument from 'pdfkit';
 
 /**
- * LEGACY INVOICE (classic format) — updated to use:
- * - Address Line 1 (Billed to)
- * - Address Line 2 (Shipped to; falls back to Line 1)
- * - PO/dated (optional line under addresses)
- * Also includes the fixed table widths so the "Total" column fits on page.
+ * LEGACY INVOICE (classic format) — unchanged layout, small safety tweaks.
+ * Renders line items from `categoryData` where qty > 0; totals use the passed
+ * values so they stay consistent with your controller-side calculations.
  */
+// --- REPLACE ONLY THIS FUNCTION IN utils/pdf.js ---
 export const generateInvoicePDF = (
   client,
   month,
@@ -29,7 +28,7 @@ export const generateInvoicePDF = (
     doc.on('end', () => resolve(Buffer.concat(buffers)));
     doc.on('error', reject);
 
-    // ========= Header =========
+    // ========= Header (unchanged visual) =========
     doc.fontSize(12).text('PGS INDIA PRIVATE LIMITED', 50, 50, { align: 'center' });
     doc.fontSize(10).text('2ND FLOOR, OFFICE NO. 207, PLOT NO. 56,', 50, 65, { align: 'center' });
     doc.text('MONARCH PLAZA, SECTOR-11, CBD BELAPUR,', 50, 80, { align: 'center' });
@@ -54,37 +53,26 @@ export const generateInvoicePDF = (
     doc.text('Vehicle No. : ', 300, 220);
     doc.text('Place of Supply : ', 300, 235);
 
-    // -------- Addresses (2-line model) --------
-    const billedTo = (client?.address_line1 || '').trim();
-    const shippedTo = (client?.address_line2 && client.address_line2.trim())
-      ? client.address_line2.trim()
-      : billedTo;
-    const poDated = (client?.po_dated && client.po_dated.trim()) ? client.po_dated.trim() : null;
-
-    // Billed to
     doc.text('Details of Receiver | Billed to:', 50, 300);
     doc.text('Name : ' + (client?.name || ''), 50, 315);
-    doc.text('Address : ' + billedTo, 50, 330);
+    doc.text('Address : ' + (client?.address || ''), 50, 330);
     doc.text('State : Maharashtra', 50, 345);
     doc.text('State Code : 27', 50, 360);
 
-    // Shipped to
     doc.text('Details of Consignee | Shipped to:', 300, 300);
     doc.text('Name : ' + (client?.name || ''), 300, 315);
-    doc.text('Address : ' + shippedTo, 300, 330);
+    doc.text('Address : ' + (client?.address || ''), 300, 330);
     doc.text('State : Maharashtra', 300, 345);
     doc.text('State Code : 27', 300, 360);
-
-    // PO/dated (optional)
-    if (poDated) {
-      doc.text('PO/dated : ' + poDated, 50, 375);
-    }
 
     // ========= Table (fits within page width) =========
     doc.font('Courier');
 
+    // Printable width on A4 with 36pt margins ≈ 523pt
     const left = 36;
     const contentWidth = doc.page.width - 2 * 36; // ~523
+
+    // New column widths sum to 505pt (fits inside 523pt comfortably)
     const colW = [
       25,  // Sr. No.
       90,  // Name of product
@@ -105,7 +93,7 @@ export const generateInvoicePDF = (
     colW.reduce((x, w, i) => (colX[i] = x, x + w), startX);
 
     // Header row
-    const tY = 395; // moved slightly down if PO line is present
+    const tY = 380;
     doc.fontSize(6);
     const headerLabels = [
       'Sr. No.', 'Name of product', 'HSN/SAC', 'QTY', 'Unit', 'Rate',
@@ -163,7 +151,7 @@ export const generateInvoicePDF = (
     doc.text('Rs. ' + sgstTotal.toFixed(2), colX[10], y, { width: colW[10], align: 'right' });
     doc.text('Rs. ' + grandTotalCalc.toFixed(2), colX[11], y, { width: colW[11], align: 'right' });
 
-    // ========= Footer panels =========
+    // ========= Footer panels (unchanged) =========
     doc.font('Helvetica');
     y += 30;
     doc.text('Bank Details', 50, y + 15);
@@ -208,8 +196,9 @@ export const generateInvoicePDF = (
   });
 };
 
+
 /**
- * SALARY PDF (unchanged except minor safety casts).
+ * SALARY PDF — unchanged logic (minor safety casts).
  */
 export const generateSalaryPDF = (
   employee,
@@ -235,7 +224,7 @@ export const generateSalaryPDF = (
 
     doc.fontSize(14).text('Salary Slip for the month of ' + month, 50, 50, { align: 'center' });
 
-    // Employee details
+    // Employee details with fallback
     doc.fontSize(10).text('Name : ' + (employee?.name || 'N/A'), 50, 80);
     doc.text('Designation : ' + (employee?.category || 'N/A'), 50, 90);
     doc.text('Deptt : Admin', 50, 100);
@@ -341,7 +330,9 @@ export const generateSalaryPDF = (
 
 /**
  * ATTENDANCE CHART PDF — ALWAYS produces at least one page.
- * Uses client address lines in header if present.
+ * Shows 0/1/2 per day (0 = Absent, 1 = Present, 2 = Weekly Off/Holiday Duty and counts as 2).
+ * If employee list is empty, we still render a one-page "No attendance data" notice,
+ * so your merged invoice always includes the chart section.
  */
 export async function generateAttendanceChartPDF({ client, month, employees, daysInMonth, presentByEmp }) {
   return new Promise((resolve, reject) => {
@@ -355,22 +346,18 @@ export async function generateAttendanceChartPDF({ client, month, employees, day
     const pageH = doc.page.height;
     const left = 24, right = pageW - 24, bottom = pageH - 24;
 
-    const addressLine =
-      (client?.address_line1?.trim() || '') +
-      (client?.address_line2?.trim() ? ` | ${client.address_line2.trim()}` : '');
-
     // Header
     const mainTitle = `Attendance Chart — ${client?.name || 'Client'} — ${month}`;
     function header(title = mainTitle) {
       doc.fontSize(16).text(title, { align: 'center' });
       doc.moveDown(0.5);
-      if (addressLine) doc.fontSize(10).text(`Address: ${addressLine}`, { align: 'center' });
+      if (client?.address) doc.fontSize(10).text(`Address: ${client.address}`, { align: 'center' });
       doc.moveDown(0.5);
       doc.fontSize(9).text('Values: 0 = Absent, 1 = Present, 2 = Weekly Off/Holiday Duty (counts as 2). Only verified attendance is shown.', { align: 'center' });
       doc.moveDown(0.5);
     }
 
-    // If no employees → one info page
+    // If no employees → render a single-friendly page and exit.
     const list = Array.isArray(employees) ? employees : [];
     if (list.length === 0) {
       header();
@@ -421,9 +408,9 @@ export async function generateAttendanceChartPDF({ client, month, employees, day
         const iso = `${month}-${String(d).padStart(2, '0')}`;
         let val = 0;
         if (perEmp instanceof Set) {
-          val = perEmp.has(iso) ? 1 : 0;
+          val = perEmp.has(iso) ? 1 : 0;            // legacy set
         } else if (perEmp && typeof perEmp.get === 'function') {
-          val = Number(perEmp.get(iso) ?? 0);
+          val = Number(perEmp.get(iso) ?? 0);       // 0|1|2
         }
         sum += (val === 2 ? 2 : val === 1 ? 1 : 0);
         doc.text(String(val), x, y + 4, { width: dayColW, align: 'center' });
@@ -433,12 +420,13 @@ export async function generateAttendanceChartPDF({ client, month, employees, day
       doc.y = y + rowH;
     }
 
-    // Draw
+    // Start & draw
     header();
     drawHeaderRow();
 
     let serial = 1;
     for (const emp of list) {
+      // new page if needed
       if (doc.y + rowH + 10 > bottom) {
         doc.addPage({ size: 'A4', layout: 'landscape', margin: 24 });
         header(`${mainTitle} (contd.)`);

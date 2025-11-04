@@ -1,128 +1,221 @@
 // db.js
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
+import bcrypt from 'bcrypt';
 import fs from 'fs';
 import path from 'path';
 
-const DB_PATH = process.env.DB_PATH || path.join('./data', 'database.db');
+// Prefer an absolute Disk path in production. Fallback keeps local dev working.
+const DATA_DIR =
+  process.env.DATA_DIR ||
+  path.dirname(process.env.DB_PATH || '') ||            // if DB_PATH=/var/data/database.db
+  '/var/data';                                          // Render's common Disk mount
 
-async function openDb() {
-  const dir = path.dirname(DB_PATH);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+const DB_FILE = process.env.DB_PATH
+  ? path.basename(process.env.DB_PATH)
+  : 'database.db';
 
-  const db = await open({
-    filename: DB_PATH,
-    driver: sqlite3.Database
-  });
+fs.mkdirSync(DATA_DIR, { recursive: true });
+export const DB_PATH = path.join(DATA_DIR, DB_FILE);
+
+// Keep a single connection for the process
+let _dbPromise;
+export async function getDB() {
+  if (!_dbPromise) {
+    _dbPromise = open({ filename: DB_PATH, driver: sqlite3.Database });
+  }
+  return _dbPromise;
+}
+
+export async function initDB() {
+  const db = await getDB();
+
+  await db.run(`CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE,
+    password TEXT,
+    role TEXT
+  )`);
+
+  await db.run(`CREATE TABLE IF NOT EXISTS clients (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    address TEXT,
+    contact TEXT,
+    telephone TEXT,
+    email TEXT,
+    cgst REAL,
+    sgst REAL
+  )`);
+
+  await db.run(`CREATE TABLE IF NOT EXISTS client_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER,
+    category TEXT,
+    monthly_rate REAL,
+    FOREIGN KEY(client_id) REFERENCES clients(id)
+  )`);
+
+  await db.run(`CREATE TABLE IF NOT EXISTS employees (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    father_name TEXT,
+    local_address TEXT,
+    permanent_address TEXT,
+    telephone TEXT,
+    email TEXT,
+    marital_status TEXT,
+    spouse_name TEXT,
+    next_kin_name TEXT,
+    next_kin_telephone TEXT,
+    next_kin_address TEXT,
+    identifier_name TEXT,
+    identifier_address TEXT,
+    identifier_telephone TEXT,
+    epf_number TEXT,
+    esic_number TEXT,
+    criminal_record TEXT,
+    salary_per_month REAL,
+    category TEXT,
+    client_id INTEGER,
+    FOREIGN KEY(client_id) REFERENCES clients(id)
+  )`);
+
+  await db.run(`CREATE TABLE IF NOT EXISTS attendances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER,
+    date TEXT,
+    present INTEGER,
+    submitted_by INTEGER,
+    client_id INTEGER,
+    status TEXT DEFAULT 'pending',
+    FOREIGN KEY(employee_id) REFERENCES employees(id),
+    FOREIGN KEY(submitted_by) REFERENCES security_supervisors(id),
+    FOREIGN KEY(client_id) REFERENCES clients(id)
+  )`);
+
+  await db.run(`CREATE TABLE IF NOT EXISTS deductions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER,
+    amount REAL,
+    reason TEXT,
+    date TEXT,
+    month TEXT,
+    FOREIGN KEY(employee_id) REFERENCES employees(id)
+  )`);
+
+  await db.run(`CREATE TABLE IF NOT EXISTS invoices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER,
+    month TEXT,
+    invoice_no TEXT,
+    subtotal REAL,
+    service_charges REAL,
+    total REAL,
+    cgst_amount REAL,
+    sgst_amount REAL,
+    grand_total REAL,
+    invoice_date TEXT,
+    FOREIGN KEY(client_id) REFERENCES clients(id)
+  )`);
+
+  await db.run(`CREATE TABLE IF NOT EXISTS salaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER,
+    month TEXT,
+    attendance_days INTEGER,
+    amount REAL,
+    deductions REAL,
+    net_amount REAL,
+    salary_date TEXT,
+    FOREIGN KEY(employee_id) REFERENCES employees(id)
+  )`);
+
+  await db.run(`CREATE TABLE IF NOT EXISTS requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    requester_id INTEGER,
+    action TEXT,
+    table_name TEXT,
+    record_id INTEGER,
+    data TEXT,
+    new_data TEXT,
+    status TEXT DEFAULT 'pending',
+    FOREIGN KEY(requester_id) REFERENCES users(id)
+  )`);
+
+  await db.run(`CREATE TABLE IF NOT EXISTS security_supervisors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    username TEXT UNIQUE,
+    password TEXT,
+    client_id INTEGER,
+    site_name TEXT,
+    created_by INTEGER,
+    FOREIGN KEY(client_id) REFERENCES clients(id),
+    FOREIGN KEY(created_by) REFERENCES users(id)
+  )`);
+
+  // --- Seed admin if missing ---
+  const adminUsername = process.env.ADMIN_USERNAME || 'admin';
+  const existing = await db.get('SELECT id FROM users WHERE username = ?', adminUsername);
+  if (!existing) {
+    const plain = process.env.ADMIN_PASSWORD || 'Admin@123';
+    const hash = await bcrypt.hash(plain, 10);
+    await db.run(
+      'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
+      adminUsername, hash, 'admin'
+    );
+    console.log(`[seed] Admin created → ${adminUsername}`);
+  }
+
+   // --- Seed accountant if missing ---
+const accountantUsername = process.env.ACCOUNTANT_USERNAME || 'accountant';
+const existingAcc = await db.get('SELECT id FROM users WHERE username = ?', accountantUsername);
+if (!existingAcc) {
+  const plain = process.env.ACCOUNTANT_PASSWORD || 'Account@123';
+  const hash = await bcrypt.hash(plain, 10);
+  await db.run(
+    'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
+    accountantUsername, hash, 'accountant'
+  );
+  console.log(`[seed] Accountant created → ${accountantUsername}`);
+}
+
+// --- Seed HR if missing ---
+const hrUsername = process.env.HR_USERNAME || 'hr';
+const existingHr = await db.get('SELECT id FROM users WHERE username = ?', hrUsername);
+if (!existingHr) {
+  const plain = process.env.HR_PASSWORD || 'Hr@123';
+  const hash = await bcrypt.hash(plain, 10);
+  await db.run(
+    'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
+    hrUsername, hash, 'hr'
+  );
+  console.log(`[seed] HR created → ${hrUsername}`);
+}
+
+  
+  if (!existing) {
+    const plain = process.env.ADMIN_PASSWORD || 'Admin@123';
+    const hash = await bcrypt.hash(plain, 10);
+    await db.run(
+      'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
+      adminUsername, hash, 'admin'
+    );
+    console.log(`[seed] Admin created → ${adminUsername}`);
+  }
+
+  console.log('[db] SQLite file:', DB_PATH);
   return db;
 }
 
-async function ensureSchema() {
-  const db = await openDb();
-  try {
-    // clients table
-    await db.exec(`
-      CREATE TABLE IF NOT EXISTS clients (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        client_unique_number TEXT,
-        address_line1 TEXT,
-        address_line2 TEXT,
-        state TEXT,
-        district TEXT,
-        telephone TEXT,
-        email TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // users table for simple auth (for dev). Passwords stored in plain text here for simplicity.
-    // Change to hashed passwords for production (bcrypt).
-    await db.exec(`
-      CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        role TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // seed a default user (accountant / rohit123) only if not exists
-    const existing = await db.get(`SELECT id FROM users WHERE username = ?`, 'accountant');
-    if (!existing) {
-      await db.run(`INSERT INTO users (username, password, role) VALUES (?, ?, ?)`, 'accountant', 'rohit123', 'accountant');
-      console.log('Seeded default user: accountant / rohit123 (dev only)');
-    }
-  } finally {
-    await db.close();
-  }
+export async function query(sql, params = []) {
+  const db = await getDB();
+  return db.all(sql, params);
 }
 
-// data functions
-export async function getClients() {
-  const db = await openDb();
-  try {
-    const rows = await db.all(`
-      SELECT id, name, client_unique_number, address_line1, address_line2, state, district, telephone, email, created_at
-      FROM clients
-      ORDER BY id DESC
-    `);
-    return rows;
-  } finally {
-    await db.close();
-  }
+export async function run(sql, params = []) {
+  const db = await getDB();
+  const res = await db.run(sql, params);
+  return { insertId: res?.lastID, changes: res?.changes };
 }
-
-export async function insertClient(payload = {}) {
-  const db = await openDb();
-  try {
-    const stmt = await db.run(
-      `INSERT INTO clients (name, client_unique_number, address_line1, address_line2, state, district, telephone, email)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      payload.name || null,
-      payload.client_unique_number || null,
-      payload.address_line1 || null,
-      payload.address_line2 || null,
-      payload.state || null,
-      payload.district || null,
-      payload.telephone || null,
-      payload.email || null
-    );
-    return { id: stmt.lastID ?? null };
-  } finally {
-    await db.close();
-  }
-}
-
-export async function getUserByUsername(username) {
-  const db = await openDb();
-  try {
-    const row = await db.get(`SELECT id, username, password, role FROM users WHERE username = ?`, username);
-    return row || null;
-  } finally {
-    await db.close();
-  }
-}
-
-export async function createUser(username, password, role = 'accountant') {
-  const db = await openDb();
-  try {
-    const stmt = await db.run(`INSERT INTO users (username, password, role) VALUES (?, ?, ?)`, username, password, role);
-    return { id: stmt.lastID ?? null };
-  } finally {
-    await db.close();
-  }
-}
-
-// ensure schema is present at module load
-await ensureSchema();
-
-export default {
-  openDb,
-  getClients,
-  insertClient,
-  getUserByUsername,
-  createUser,
-  DB_PATH
-};

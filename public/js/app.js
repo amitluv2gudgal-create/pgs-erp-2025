@@ -13,7 +13,7 @@ const fetchAuth = (url, opts = {}) => fetch(url, { credentials: 'include', ...op
 let user; // Declare user globally
 
 document.addEventListener('DOMContentLoaded', async () => {
-  const res = await fetchAuth('/api/auth/current-user');
+  const res = await fetch('/api/auth/current-user', { credentials: 'include' });
   if (!res.ok) {
     window.location.href = '/login.html';
     return;
@@ -76,7 +76,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('logoutBtn').addEventListener('click', async () => {
     try {
-      await fetchAuth('/api/auth/logout', { method: 'POST' });
+      await fetch('/api/auth/logout', { credentials: 'include' });
     } catch (err) {
       console.error('Logout error:', err);
     }
@@ -102,7 +102,7 @@ window.showTable = async (table) => {
   else if (table === 'invoices') data = await loadInvoices();
   else if (table === 'salaries') data = await loadSalaries();
   else if (table === 'security_supervisors') {
-    const res = await fetchAuth('/api/security-supervisors');
+    const res = await fetch('/api/security-supervisors', { credentials: 'include' });
     data = res.ok ? await res.json() : [];
     if (!res.ok) console.error('Fetch error for supervisors:', await res.text());
   }
@@ -185,7 +185,7 @@ window.showSupervisorForm = async () => {
       alert('Please select a client');
       return;
     }
-    const response = await fetchAuth('/api/security-supervisors/create', {
+    const response = await fetch('/api/security-supervisors/create', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, username, password, client_id, site_name })
     });
     if (response.ok) {
@@ -193,9 +193,8 @@ window.showSupervisorForm = async () => {
       alert(`Supervisor created successfully with ID: ${data.id}`);
       showTable('security_supervisors');
     } else {
-      let errMsg = 'Unknown error';
-      try { errMsg = (await response.json()).error || errMsg; } catch(e){ errMsg = await response.text().catch(()=>errMsg); }
-      alert(`Failed to create supervisor: ${errMsg}`);
+      const error = await response.json();
+      alert(`Failed to create supervisor: ${error.error || 'Unknown error'}`);
     }
     overlay.remove();
   });
@@ -206,8 +205,8 @@ window.showAttendanceFormForSupervisor = async () => {
 
   // Fetch lists (reuse shared loaders if available)
   const [employees, clients] = await Promise.all([
-    (typeof loadEmployees === 'function' ? loadEmployees() : fetchAuth('/api/employees').then(r => r.ok ? r.json() : [] ).catch(() => [])),
-    (typeof loadClients === 'function' ? loadClients() : fetchAuth('/api/clients').then(r => r.ok ? r.json() : [] ).catch(() => [])),
+    (typeof loadEmployees === 'function' ? loadEmployees() : fetch('/api/employees').then(r => r.json()).catch(() => [])),
+    (typeof loadClients === 'function' ? loadClients() : fetch('/api/clients').then(r => r.json()).catch(() => [])),
   ]);
 
   const employeesById = {};
@@ -309,7 +308,7 @@ window.showAttendanceFormForSupervisor = async () => {
 
     try {
       console.log('[SUP FORM] payload:', { employee_id, client_id, date, present });
-      const response = await fetchAuth('/api/attendances/supervisor', {
+      const response = await fetch('/api/attendances/supervisor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ employee_id, client_id, date, present })
@@ -455,10 +454,11 @@ window.renderTable = (containerId, table, data, searchTerm) => {
   tableDiv.innerHTML = html;
 };
 
-// Keep existing approve/reject helpers (ensure credentials included)
+
+// === Add these helpers anywhere after renderTable ===
 window.approveAttendance = async (id) => {
   try {
-    const r = await fetchAuth(`/api/attendances/${id}/approve`, { method: 'POST' });
+    const r = await fetch(`/api/attendances/${id}/approve`, { method: 'POST' });
     if (!r.ok) throw new Error(await r.text());
     alert('Attendance verified');
     if (window.showTable) window.showTable('attendances');
@@ -470,7 +470,7 @@ window.approveAttendance = async (id) => {
 
 window.rejectAttendance = async (id) => {
   try {
-    const r = await fetchAuth(`/api/attendances/${id}/reject`, { method: 'POST' });
+    const r = await fetch(`/api/attendances/${id}/reject`, { method: 'POST' });
     if (!r.ok) throw new Error(await r.text());
     alert('Attendance rejected');
     if (window.showTable) window.showTable('attendances');
@@ -484,14 +484,14 @@ window.rejectAttendance = async (id) => {
 window.editAttendance = async (id) => {
   try {
     // Fetch the row (server-side truth)
-    const r = await fetchAuth(`/api/attendances/${id}`);
+    const r = await fetch(`/api/attendances/${id}`, { credentials: 'include' });
     if (!r.ok) throw new Error(await r.text());
     const row = await r.json();
 
     // Fetch employees & clients for dropdowns
     const [employees, clients] = await Promise.all([
-      (typeof loadEmployees === 'function' ? loadEmployees() : fetchAuth('/api/employees').then(x=> x.ok ? x.json() : [])),
-      (typeof loadClients === 'function' ? loadClients() : fetchAuth('/api/clients').then(x=> x.ok ? x.json() : [])),
+      (typeof loadEmployees === 'function' ? loadEmployees() : fetch('/api/employees').then(x=>x.json())),
+      (typeof loadClients === 'function' ? loadClients() : fetch('/api/clients').then(x=>x.json())),
     ]);
 
     // Build modal
@@ -556,9 +556,10 @@ window.editAttendance = async (id) => {
         // status left unchanged here; use Approve/Reject buttons for that flow
       };
       try {
-        const u = await fetchAuth(`/api/attendances/${id}`, {
+        const u = await fetch(`/api/attendances/${id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify(payload)
         });
         if (!u.ok) throw new Error(await u.text());
@@ -580,8 +581,9 @@ window.editAttendance = async (id) => {
 window.deleteAttendance = async (id) => {
   if (!confirm(`Delete attendance #${id}? This cannot be undone.`)) return;
   try {
-    const r = await fetchAuth(`/api/attendances/${id}`, {
-      method: 'DELETE'
+    const r = await fetch(`/api/attendances/${id}`, {
+      method: 'DELETE',
+      credentials: 'include'
     });
     if (!r.ok) throw new Error(await r.text());
     alert('Deleted');
@@ -589,6 +591,31 @@ window.deleteAttendance = async (id) => {
   } catch (e) {
     console.error('deleteAttendance error:', e);
     alert('Delete failed: ' + (e.message || 'Unknown error'));
+  }
+};
+
+// Keep existing approve/reject helpers (ensure credentials included)
+window.approveAttendance = async (id) => {
+  try {
+    const r = await fetch(`/api/attendances/${id}/approve`, { method: 'POST', credentials: 'include' });
+    if (!r.ok) throw new Error(await r.text());
+    alert('Attendance verified');
+    if (window.showTable) window.showTable('attendances');
+  } catch (e) {
+    console.error('approveAttendance error:', e);
+    alert('Failed to approve: ' + (e.message || 'Unknown'));
+  }
+};
+
+window.rejectAttendance = async (id) => {
+  try {
+    const r = await fetch(`/api/attendances/${id}/reject`, { method: 'POST', credentials: 'include' });
+    if (!r.ok) throw new Error(await r.text());
+    alert('Attendance rejected');
+    if (window.showTable) window.showTable('attendances');
+  } catch (e) {
+    console.error('rejectAttendance error:', e);
+    alert('Failed to reject: ' + (e.message || 'Unknown'));
   }
 };
 
@@ -658,7 +685,7 @@ window.showPendingRequests = async () => {
 window.requestEdit = async (table, id) => {
   const data = prompt(`Enter new data for ${table} ID ${id}:`);
   if (data) {
-    await fetchAuth(`/api/requests`, {
+    await fetch(`/api/requests`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ requester_id: user.id, action: 'edit', table_name: table, record_id: id, new_data: data })
@@ -669,7 +696,7 @@ window.requestEdit = async (table, id) => {
 
 window.requestDelete = async (table, id) => {
   if (confirm(`Delete ${table} ID ${id}?`)) {
-    await fetchAuth(`/api/requests`, {
+    await fetch(`/api/requests`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ requester_id: user.id, action: 'delete', table_name: table, record_id: id, new_data: null })
@@ -679,13 +706,13 @@ window.requestDelete = async (table, id) => {
 };
 
 window.approveRequest = async (id) => {
-  await fetchAuth(`/api/requests/approve/${id}`, { method: 'POST' });
+  await fetch(`/api/requests/approve/${id}`, { method: 'POST' });
   alert('Approved');
   showPendingRequests();
 };
 
 window.rejectRequest = async (id) => {
-  await fetchAuth(`/api/requests/reject/${id}`, { method: 'POST' });
+  await fetch(`/api/requests/reject/${id}`, { method: 'POST' });
   alert('Rejected');
   showPendingRequests();
 };
@@ -730,16 +757,14 @@ window.editSupervisor = async (id, name, username, client_id, site_name) => {
     const name = document.getElementById(`editSupervisorName-${uniqueId}`).value;
     const client_id = document.getElementById(`editSupervisorClientId-${uniqueId}`).value;
     const site_name = document.getElementById(`editSupervisorSite-${uniqueId}`).value;
-    const response = await fetchAuth(`/api/security-supervisors/edit/${id}`, {
+    const response = await fetch(`/api/security-supervisors/edit/${id}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, client_id, site_name })
     });
     if (response.ok) {
       alert('Supervisor updated');
       showTable('security_supervisors');
     } else {
-      let msg = 'Failed to update supervisor';
-      try { msg = (await response.json()).error || msg; } catch(e){ msg = await response.text().catch(()=>msg); }
-      alert(msg);
+      alert((await response.json()).error || 'Failed to update supervisor');
     }
     overlay.remove();
   });
@@ -747,14 +772,12 @@ window.editSupervisor = async (id, name, username, client_id, site_name) => {
 
 window.deleteSupervisor = async (id) => {
   if (confirm(`Delete Security Supervisor ID ${id}?`)) {
-    const response = await fetchAuth(`/api/security-supervisors/delete/${id}`, { method: 'DELETE' });
+    const response = await fetch(`/api/security-supervisors/delete/${id}`, { method: 'DELETE' });
     if (response.ok) {
       alert('Supervisor deleted');
       showTable('security_supervisors');
     } else {
-      let err = 'Failed to delete supervisor';
-      try { err = (await response.json()).error || err; } catch(e){ err = await response.text().catch(()=>err); }
-      alert(err);
+      alert((await response.json()).error || 'Failed to delete supervisor');
     }
   }
 };
@@ -779,7 +802,6 @@ window.showChangePassword = () => {
 
   document.getElementById('cpwCancel').onclick=()=>overlay.remove();
   document.getElementById('cpwSubmit').onclick=async ()=>{
-
     const currentPassword=document.getElementById('cpwCurrent').value.trim();
     const newPassword=document.getElementById('cpwNew').value.trim();
     const confirm=document.getElementById('cpwConfirm').value.trim();
@@ -787,18 +809,13 @@ window.showChangePassword = () => {
     if(!currentPassword||!newPassword){ msg.textContent='Fill all fields';return; }
     if(newPassword.length<8){ msg.textContent='New password must be at least 8 characters';return; }
     if(newPassword!==confirm){ msg.textContent='Passwords do not match';return; }
-    try {
-      const r=await fetchAuth('/api/auth/change-password',{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({currentPassword,newPassword})
-      });
-      const d = await r.json().catch(()=> ({}));
-      if(r.ok){ msg.style.color='green'; msg.textContent='Password updated'; setTimeout(()=>overlay.remove(),1000); }
-      else msg.textContent=d.error||'Failed';
-    } catch (e) {
-      console.error('Change password error:', e);
-      msg.textContent = 'Failed to update password';
-    }
+    const r=await fetch('/api/auth/change-password',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({currentPassword,newPassword})
+    });
+    const d=await r.json();
+    if(r.ok){ msg.style.color='green'; msg.textContent='Password updated'; setTimeout(()=>overlay.remove(),1000); }
+    else msg.textContent=d.error||'Failed';
   };
 };
 
@@ -820,24 +837,19 @@ window.resetSupervisorPassword = (id, username) => {
   document.body.appendChild(overlay);
 
   document.getElementById('rpwCancel').onclick=()=>overlay.remove();
-  document.getElementById('rpwSubmit').onclick=async ()=> {
+  document.getElementById('rpwSubmit').onclick=async ()=>{
     const newPw=document.getElementById('rpwNew').value.trim();
     const confirmPw=document.getElementById('rpwConfirm').value.trim();
     const msg=document.getElementById('rpwMsg');
     if(!newPw||newPw.length<8){ msg.textContent='Password must be at least 8 characters'; return; }
     if(newPw!==confirmPw){ msg.textContent='Passwords do not match'; return; }
-    try {
-      const r=await fetchAuth('/api/auth/admin/reset-password',{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({userId:id,role:'security_supervisor',newPassword:newPw})
-      });
-      const d = await r.json().catch(()=> ({}));
-      if(r.ok){ msg.style.color='green'; msg.textContent='Password reset'; setTimeout(()=>overlay.remove(),1000); }
-      else msg.textContent=d.error||'Failed';
-    } catch (e) {
-      console.error('Reset supervisor pw error:', e);
-      msg.textContent='Failed';
-    }
+    const r=await fetch('/api/auth/admin/reset-password',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({userId:id,role:'security_supervisor',newPassword:newPw})
+    });
+    const d=await r.json();
+    if(r.ok){ msg.style.color='green'; msg.textContent='Password reset'; setTimeout(()=>overlay.remove(),1000); }
+    else msg.textContent=d.error||'Failed';
   };
 };
 
@@ -861,14 +873,14 @@ window.resetSupervisorPassword = (id, username) => {
 
 async function adminLookupUserId(role, username) {
   const qs = new URLSearchParams({ role, username });
-  const r = await fetchAuth(`/api/auth/lookup-user?${qs.toString()}`);
+  const r = await fetch(`/api/auth/lookup-user?${qs.toString()}`);
   const data = await r.json().catch(()=> ({}));
   if (!r.ok) throw new Error(data.error || 'Lookup failed');
   return data; // { ok:true, id, role, username }
 }
 
 async function adminResetPassword(userId, role, newPassword) {
-  const r = await fetchAuth('/api/auth/admin/reset-password', {
+  const r = await fetch('/api/auth/admin/reset-password', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ userId, role, newPassword })
@@ -1258,7 +1270,7 @@ function showClientProfile(cli, invoicesAll) {
 
 async function safeGet(url) {
   try {
-    const r = await fetchAuth(url);
+    const r = await fetch(url, { credentials: 'include' });
      if (!r.ok) throw new Error(await r.text());
      return await r.json();
    } catch (e) {
