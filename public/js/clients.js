@@ -1,5 +1,6 @@
 // public/js/clients.js
-async function loadClients() {
+// Exported loadClients so other modules can import { loadClients } from './clients.js'
+export async function loadClients() {
   try {
     const res = await fetch('/api/clients', {
       method: 'GET',
@@ -23,6 +24,9 @@ async function loadClients() {
     if (el) el.innerHTML = `<div class="error">Network error: ${err?.message || err}</div>`;
   }
 }
+
+// make it available on window for inline/onclick usage
+window.loadClients = loadClients;
 
 function renderClientsTable(clients = []) {
   const el = document.querySelector('#clientsTable');
@@ -65,6 +69,3 @@ function escapeHtml(unsafe) {
     }[s];
   });
 }
-
-// expose for button onclick
-window.loadClients = loadClients;
