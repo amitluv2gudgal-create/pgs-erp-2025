@@ -1,118 +1,104 @@
-// server.js (patched)
+// server.js
 import express from 'express';
 import cors from 'cors';
 import session from 'express-session';
 import SQLiteStoreFactory from 'connect-sqlite3';
-import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
-
-// DB helpers and migrations (as you had)
-import {
-  dropLegacyClientAddressColumn,
-  ensureRequestsApproverColumn,
-  ensureClientExtraFields,
-  initDB,
-  dbModule,
-  DB_PATH
-} from './db.js';
-
-// Routers
-import authRoutes from './controllers/auth.js';
-import clientRoutes from './controllers/clients.js';
-import employeeRoutes from './controllers/employees.js';
-import attendanceRoutes from './controllers/attendances.js';
-import deductionRoutes from './controllers/deductions.js'; // single import for deductions
-import invoiceRoutes from './controllers/invoices.js';
-import salaryRoutes from './controllers/salaries.js';
-import requestRoutes from './controllers/requests.js';
-import securitySupervisorRoutes from './controllers/security_supervisors.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
-app.use(cors()); // adjust origin in production if needed
 app.use(express.json());
-app.set('trust proxy', 1); // required on Render for secure cookies
+app.use(express.urlencoded({ extended: true }));
 
-// parse bodies
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.static('public'));
+// --- CORS config (allow your dev origin + deployed origin) ---
+const allowedOrigins = [
+  'http://localhost:3000',                     // frontend dev (change if different)
+  'http://localhost:8080',                     // alternate local front-end
+  'https://pgs-erp-2025-1.onrender.com'        // deployed front-end (change to your domain)
+];
 
-// Session store (sqlite)
+// allow null origin (curl, server-to-server)
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error('CORS not allowed'), false);
+  },
+  credentials: true
+}));
+
+// --- sessions ---
 const SQLiteStore = SQLiteStoreFactory(session);
-
-// ensure data directory exists when running locally; Render will create files under project
-// Use './data' directory for session DB (ensure it exists in repo or created at runtime)
-const sessionStore = new SQLiteStore({
-  db: 'sessions.sqlite',
-  dir: './data',
-  concurrentDB: true
-});
-
-const { SESSION_SECRET, NODE_ENV } = process.env;
-const PORT = process.env.PORT || 3000;
-
-if (!SESSION_SECRET) {
-  console.error('Missing SESSION_SECRET environment variable — set it on Render or locally');
-  process.exit(1);
-}
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const PORT = process.env.PORT || 8080;
+const SESSION_SECRET = process.env.SESSION_SECRET || 'please-change-this-secret';
 
 app.use(session({
-  store: sessionStore,
+  store: new SQLiteStore({ db: 'sessions.sqlite', dir: './data', concurrentDB: true }),
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
     maxAge: 24 * 60 * 60 * 1000,
-    secure: NODE_ENV === 'production', // true in Render (HTTPS)
-    sameSite: 'lax'
+    secure: NODE_ENV === 'production',                       // secure in production (HTTPS)
+    sameSite: NODE_ENV === 'production' ? 'none' : 'lax'    // none so cross-site cookies work in prod
   }
 }));
 
-// Only protect /api; allow /api/auth/login and /api/auth/current-user
-const requireAuth = (req, res, next) => {
-  if (req.path === '/auth/login' || req.path === '/auth/current-user') return next();
-  if (!req.session?.user) return res.status(401).json({ error: 'Unauthorized' });
-  next();
-};
+// serve static front-end
+app.use(express.static(path.join(__dirname, 'public')));
 
-async function bootstrap() {
-  try {
-    // Initialize DB and run idempotent migrations
-    await initDB();
-    console.log('[db] Ready at:', DB_PATH);
+// small health route
+app.get('/health', (req, res) => res.json({ ok: true }));
 
-    await ensureRequestsApproverColumn().catch(err => console.error('ensureRequestsApproverColumn failed:', err));
-    await ensureClientExtraFields().catch(err => console.error('ensureClientExtraFields failed:', err));
-    await dropLegacyClientAddressColumn().catch(err => console.error('dropLegacyClientAddressColumn failed:', err));
+// import controllers (they export routers / handler functions)
+import authRouter from './controllers/auth.js';
+import clientsController from './controllers/clients.js';
 
-    // Register middleware and routes AFTER DB ready
-    app.use('/api', requireAuth);
+// mount auth router under /api/auth
+app.use('/api/auth', authRouter);
 
-    // mount routers (one registration per route)
-    app.use('/api/auth', authRoutes);
-    app.use('/api/clients', clientRoutes);
-    app.use('/api/employees', employeeRoutes);
-    app.use('/api/attendances', attendanceRoutes);
-    app.use('/api/deductions', deductionRoutes);
-    app.use('/api/invoices', invoiceRoutes);
-    app.use('/api/salaries', salaryRoutes);
-    app.use('/api/requests', requestRoutes);
-    app.use('/api/security-supervisors', securitySupervisorRoutes);
+// requireAuth middleware for /api routes except /api/auth
+function requireAuth(req, res, next) {
+  // allow login routes
+  if (req.path.startsWith('/auth')) return next();
 
-    // Basic pages
-    app.get('/', (req, res) => res.redirect('/login.html'));
-    app.get('/favicon.ico', (req, res) => res.status(204).end());
+  // allow public health or static assets
+  if (req.path === '/health') return next();
 
-    // start server
-    app.listen(PORT, () => {
-      console.log(`PGS-ERP running on http://localhost:${PORT} (port ${PORT})`);
-    });
-  } catch (err) {
-    console.error('Fatal startup error:', err);
-    process.exit(1);
-  }
+  // all /api requests should be authenticated
+  if (req.session && req.session.user) return next();
+
+  return res.status(401).json({ error: 'Unauthorized' });
 }
+app.use('/api', requireAuth);
 
-bootstrap();
+// client endpoints
+// GET /api/clients
+app.get('/api/clients', clientsController.getClients);
+// POST /api/clients
+app.post('/api/clients', clientsController.createClient);
+
+// optional: current-user helper (for debug)
+app.get('/api/auth/current-user', (req, res) => {
+  res.json({ user: req.session?.user ?? null });
+});
+
+// global error handler
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err && err.stack ? err.stack : err);
+  if (!res.headersSent) res.status(500).json({ error: 'Unhandled server error', message: err?.message });
+  else next(err);
+});
+
+process.on('unhandledRejection', (r) => console.error('unhandledRejection', r));
+process.on('uncaughtException', (err) => console.error('uncaughtException', err && err.stack ? err.stack : err));
+
+// start server
+app.listen(PORT, () => console.log(`PGS-ERP running on port ${PORT} (NODE_ENV=${NODE_ENV})`));
