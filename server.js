@@ -20,7 +20,7 @@ app.use(express.urlencoded({ extended: true }));
 const allowedOrigins = [
   'http://localhost:3000',                     // frontend dev (change if different)
   'http://localhost:8080',                     // alternate local front-end
-  'https://pgs-erp-2025-1.onrender.com'        // deployed front-end (change to your domain)
+  'https://pgs-erp-2025-1.onrender.com'        // deployed front-end (change if different)
 ];
 
 // allow null origin (curl, server-to-server)
@@ -57,9 +57,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 // small health route
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-// import controllers (they export routers / handler functions)
+// import controllers (note: use named import for clients)
 import authRouter from './controllers/auth.js';
-import clientsController from './controllers/clients.js';
+import { getClients, createClient } from './controllers/clients.js';
 
 // mount auth router under /api/auth
 app.use('/api/auth', authRouter);
@@ -81,9 +81,9 @@ app.use('/api', requireAuth);
 
 // client endpoints
 // GET /api/clients
-app.get('/api/clients', clientsController.getClients);
+app.get('/api/clients', getClients);
 // POST /api/clients
-app.post('/api/clients', clientsController.createClient);
+app.post('/api/clients', createClient);
 
 // optional: current-user helper (for debug)
 app.get('/api/auth/current-user', (req, res) => {
