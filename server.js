@@ -1,9 +1,9 @@
 // server.js
 import express from 'express';
+import cors from 'cors';
 import session from 'express-session';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
-
 import { initDB, DB_PATH } from './db.js';
 
 // Route modules (pure routers — must NOT touch DB at import time)
@@ -20,6 +20,19 @@ import securitySupervisorRoutes from './controllers/security_supervisors.js';
 dotenv.config();
 
 const app = express();
+
+const allowedOrigin = 'https://pgs-erp-2025-1.onrender.com'
+
+app.use(cors({
+  origin: (origin, cb) => {
+    // allow requests with no origin (eg. curl or same-origin)
+    if (!origin) return cb(null, true);
+    if (origin === allowedOrigin) return cb(null, true);
+    return cb(new Error('CORS not allowed'), false);
+  },
+  credentials: true,
+  exposedHeaders: ['Set-Cookie'] // optional
+}));
 
 // Behind Render's proxy, this is REQUIRED for secure cookies to be set
 app.set('trust proxy', 1);
