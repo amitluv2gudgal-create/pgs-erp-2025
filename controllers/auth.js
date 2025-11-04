@@ -1,7 +1,6 @@
-// controllers/auth.js  -- bcrypt-enabled auth (paste if needed)
+// controllers/auth.js (temporary plain-text compare - remove when bcrypt is available)
 import express from 'express';
 import * as db from '../db.js';
-import bcrypt from 'bcryptjs';
 
 const router = express.Router();
 
@@ -13,9 +12,7 @@ router.post('/login', async (req, res) => {
     const user = await db.getUserByUsername(username);
     if (!user) return res.status(401).json({ success: false, error: 'Invalid credentials' });
 
-    // use bcrypt compare
-    const ok = bcrypt.compareSync(String(password), String(user.password));
-    if (!ok) return res.status(401).json({ success: false, error: 'Invalid credentials' });
+    if (String(user.password) !== String(password)) return res.status(401).json({ success: false, error: 'Invalid credentials' });
 
     req.session.user = { id: user.id, username: user.username, role: user.role };
     req.session.save(err => {
