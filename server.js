@@ -54,16 +54,18 @@ app.use(express.static('public'));
 
 // Session cookie must allow cross-site (frontend -> backend on different origin)
 app.use(session({
+  name: 'pgs_sid',   // <-- make sure this matches the cookie you clear in auth.js
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    sameSite: 'none',                    // important for cross-site cookies
-    secure: NODE_ENV === 'production',   // true on Render (HTTPS)
-    maxAge: 7 * 24 * 60 * 60 * 1000      // 7 days
+    sameSite: 'none',
+    secure: NODE_ENV === 'production',
+    maxAge: 7*24*60*60*1000
   }
 }));
+
 
 // Only protect /api; allow unauthenticated access to login and current-user endpoints
 const requireAuth = (req, res, next) => {
@@ -81,11 +83,12 @@ async function bootstrap() {
   await initDB();
   console.log('[db] Ready at:', DB_PATH);
 
+  app.use('/api/auth', authRoutes);
+
   // 2) Register middleware AFTER DB is ready
   app.use('/api', requireAuth);
 
   // 3) Register routes (routers must not run queries at import time)
-  app.use('/api/auth', authRoutes);
   app.use('/api/clients', clientRoutes);
   app.use('/api/employees', employeeRoutes);
   app.use('/api/attendances', attendanceRoutes);
