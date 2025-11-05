@@ -86,6 +86,21 @@ router.post('/login', async (req, res) => {
   }
 });
 
+router.post('/logout', (req, res) => {
+  // if using session
+  req.session?.destroy((err) => {
+    if (err) {
+      console.error('[auth/logout] session destroy error:', err);
+      // still clear cookie client-side
+      res.clearCookie('pgs_sid', { path: '/', sameSite: 'none', secure: process.env.NODE_ENV === 'production' });
+      return res.status(500).json({ error: 'Logout failed' });
+    }
+    // clear cookie and return JSON OK
+    res.clearCookie('pgs_sid', { path: '/', sameSite: 'none', secure: process.env.NODE_ENV === 'production' });
+    return res.json({ ok: true });
+  });
+});
+
 // ================== LOGOUT ==================
 router.get('/logout', (req, res) => {
   req.session.destroy(err => {

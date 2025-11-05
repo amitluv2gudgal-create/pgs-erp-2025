@@ -1391,3 +1391,71 @@ function parseAsDateOrMonth(s) {
   const t = Date.parse(s);
   return isNaN(t) ? null : new Date(t);
 }}
+
+
+// Robust attach: works even if button is rendered later
+function attachLogoutHandler() {
+  // Try common ids/classes; adjust if your markup differs
+  const selectors = ['#logoutBtn', 'button.logout', '.logout-btn'];
+  let btn = null;
+  for (const s of selectors) {
+    btn = document.querySelector(s);
+    if (btn) break;
+  }
+
+  if (!btn) {
+    console.log('[PGS-ERP] Logout button not found yet. Will retry in 500ms.');
+    // try again later (useful if DOM built after)
+    setTimeout(attachLogoutHandler, 500);
+    return;
+  }
+
+  // If handler already set, avoid double-wire
+  if (btn.dataset.logoutAttached === '1') {
+    console.log('[PGS-ERP] Logout handler already attached.');
+    return;
+  }
+  btn.dataset.logoutAttached = '1';
+
+  btn.addEventListener('click', async (ev) => {
+    ev.preventDefault();
+    console.log('[PGS-ERP] Logout clicked — calling /api/auth/logout');
+
+    try {
+      const resp = await fetchAuth('/api/auth/logout', { method: 'POST', headers: { 'Accept': 'application/json' }});
+
+      console.log('[PGS-ERP] /api/auth/logout response status:', resp.status, 'headers:', [...resp.headers.entries()]);
+
+      // handle JSON responses safely
+      const ct = resp.headers.get('content-type') || '';
+      let body = null;
+      if (ct.includes('application/json')) {
+        body = await resp.json();
+        console.log('[PGS-ERP] /api/auth/logout json body:', body);
+      } else {
+        body = await resp.text();
+        console.log('[PGS-ERP] /api/auth/logout non-json body (truncated):', body.slice(0,200));
+      }
+
+      if (resp.ok) {
+        // destroy client-side UX and go to login
+        console.log('[PGS-ERP] Logout OK — redirecting to login');
+        window.location.href = '/login.html';
+      } else {
+        console.warn('[PGS-ERP] Logout failed:', resp.status, body);
+        alert('Logout failed. Check console/network logs.');
+      }
+    } catch (err) {
+      console.error('[PGS-ERP] Network error during logout:', err);
+      alert('Network error during logout. Check console for details.');
+    }
+  });
+}
+
+// start attaching after DOM ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', attachLogoutHandler);
+} else {
+  attachLogoutHandler();
+}
+
