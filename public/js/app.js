@@ -774,7 +774,7 @@ window.approveRequest = async (id) => {
 };
 
 window.rejectRequest = async (id) => {
-  await fetch(`/api/requests/reject/${id}`, { method: 'POST' });
+  await fetchAuth(`/api/requests/reject/${id}`, { method: 'POST' });
   alert('Rejected');
   showPendingRequests();
 };
@@ -1332,7 +1332,7 @@ function showClientProfile(cli, invoicesAll) {
 
 async function safeGet(url) {
   try {
-    const r = await fetchAuth(url, { credentials: 'include' });
+    const r = await fetch(url, { credentials: 'include' });
      if (!r.ok) throw new Error(await r.text());
      return await r.json();
    } catch (e) {
