@@ -12,18 +12,48 @@ const fetchAuth = (url, opts = {}) => fetch(url, { credentials: 'include', ...op
 
 let user; // Declare user globally
 
-document.addEventListener('DOMContentLoaded', async () => {
-  const res = await fetch('/api/auth/current-user', { credentials: 'include' });
-  if (!res.ok) {
-    window.location.href = '/login.html';
-    return;
-  }
-  user = await res.json();
-  if (!user || typeof user.role === 'undefined') {
-    console.error('User data is invalid or missing role:', user);
-    window.location.href = '/login.html';
-    return;
-  }
+if (!location.pathname.endsWith('/login.html') && !location.pathname.endsWith('/login')) {
+  document.addEventListener('DOMContentLoaded', async () => {
+    let res;
+    try {
+      res = await fetchAuth('/api/auth/current-user', { method: 'GET', headers: { 'Accept': 'application/json' } });
+    } catch (err) {
+      console.error('Network/CORS error while fetching current-user:', err);
+      // Show a friendly error on screen instead of redirecting to avoid flashing
+      const content = document.getElementById('content');
+      if (content) content.innerHTML = '<p style="color:#b00">Network or CORS error contacting server. Check server logs.</p>';
+      return;
+    }
+
+    // If not OK, do not immediately redirect — show a friendly message or bring user to login manually.
+    if (!res.ok) {
+      console.warn('Not authenticated or server returned non-200 for current-user:', res.status);
+      // The server should return JSON 401. We simply show login button suggestion to the user.
+      const content = document.getElementById('content');
+      if (content) {
+        content.innerHTML = `<p>You are not logged in. <a href="/login.html">Go to login</a></p>`;
+      } else {
+        // fallback: navigate to login only if user explicitly clicks or uses link
+      }
+      return;
+    }
+
+    // content-type guard: ensure server returned JSON
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      console.error('Expected JSON for current-user but got:', ct);
+      const content = document.getElementById('content');
+      if (content) content.innerHTML = '<p style="color:#b00">Server returned unexpected content for authentication. Check server-side API.</p>';
+      return;
+    }
+
+    user = await res.json();
+    if (!user || typeof user.role === 'undefined') {
+      console.error('User data is invalid or missing role:', user);
+      document.getElementById('content').innerHTML = `<p style="color:#b00">Invalid user data. <a href="/login.html">Login</a></p>`;
+      return;
+    }
+
   const content = document.getElementById('content');
   content.innerHTML = `<h2>Welcome, ${user.role}</h2>`;
 
@@ -185,7 +215,7 @@ window.showSupervisorForm = async () => {
       alert('Please select a client');
       return;
     }
-    const response = await fetch('/api/security-supervisors/create', {
+    const response = await fetchAuth('/api/security-supervisors/create', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, username, password, client_id, site_name })
     });
     if (response.ok) {
@@ -308,7 +338,7 @@ window.showAttendanceFormForSupervisor = async () => {
 
     try {
       console.log('[SUP FORM] payload:', { employee_id, client_id, date, present });
-      const response = await fetch('/api/attendances/supervisor', {
+      const response = await fetchAuth('/api/attendances/supervisor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ employee_id, client_id, date, present })
@@ -458,7 +488,7 @@ window.renderTable = (containerId, table, data, searchTerm) => {
 // === Add these helpers anywhere after renderTable ===
 window.approveAttendance = async (id) => {
   try {
-    const r = await fetch(`/api/attendances/${id}/approve`, { method: 'POST' });
+    const r = await fetchAuth(`/api/attendances/${id}/approve`, { method: 'POST' });
     if (!r.ok) throw new Error(await r.text());
     alert('Attendance verified');
     if (window.showTable) window.showTable('attendances');
@@ -470,7 +500,7 @@ window.approveAttendance = async (id) => {
 
 window.rejectAttendance = async (id) => {
   try {
-    const r = await fetch(`/api/attendances/${id}/reject`, { method: 'POST' });
+    const r = await fetchAuth(`/api/attendances/${id}/reject`, { method: 'POST' });
     if (!r.ok) throw new Error(await r.text());
     alert('Attendance rejected');
     if (window.showTable) window.showTable('attendances');
@@ -484,7 +514,7 @@ window.rejectAttendance = async (id) => {
 window.editAttendance = async (id) => {
   try {
     // Fetch the row (server-side truth)
-    const r = await fetch(`/api/attendances/${id}`, { credentials: 'include' });
+    const r = await fetchAuth(`/api/attendances/${id}`, { credentials: 'include' });
     if (!r.ok) throw new Error(await r.text());
     const row = await r.json();
 
@@ -556,7 +586,7 @@ window.editAttendance = async (id) => {
         // status left unchanged here; use Approve/Reject buttons for that flow
       };
       try {
-        const u = await fetch(`/api/attendances/${id}`, {
+        const u = await fetchAuth(`/api/attendances/${id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -581,7 +611,7 @@ window.editAttendance = async (id) => {
 window.deleteAttendance = async (id) => {
   if (!confirm(`Delete attendance #${id}? This cannot be undone.`)) return;
   try {
-    const r = await fetch(`/api/attendances/${id}`, {
+    const r = await fetchAuth(`/api/attendances/${id}`, {
       method: 'DELETE',
       credentials: 'include'
     });
@@ -597,7 +627,7 @@ window.deleteAttendance = async (id) => {
 // Keep existing approve/reject helpers (ensure credentials included)
 window.approveAttendance = async (id) => {
   try {
-    const r = await fetch(`/api/attendances/${id}/approve`, { method: 'POST', credentials: 'include' });
+    const r = await fetchAuth(`/api/attendances/${id}/approve`, { method: 'POST', credentials: 'include' });
     if (!r.ok) throw new Error(await r.text());
     alert('Attendance verified');
     if (window.showTable) window.showTable('attendances');
@@ -609,7 +639,7 @@ window.approveAttendance = async (id) => {
 
 window.rejectAttendance = async (id) => {
   try {
-    const r = await fetch(`/api/attendances/${id}/reject`, { method: 'POST', credentials: 'include' });
+    const r = await fetchAuth(`/api/attendances/${id}/reject`, { method: 'POST', credentials: 'include' });
     if (!r.ok) throw new Error(await r.text());
     alert('Attendance rejected');
     if (window.showTable) window.showTable('attendances');
@@ -685,7 +715,7 @@ window.showPendingRequests = async () => {
 window.requestEdit = async (table, id) => {
   const data = prompt(`Enter new data for ${table} ID ${id}:`);
   if (data) {
-    await fetch(`/api/requests`, {
+    await fetchAuth(`/api/requests`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ requester_id: user.id, action: 'edit', table_name: table, record_id: id, new_data: data })
@@ -696,7 +726,7 @@ window.requestEdit = async (table, id) => {
 
 window.requestDelete = async (table, id) => {
   if (confirm(`Delete ${table} ID ${id}?`)) {
-    await fetch(`/api/requests`, {
+    await fetchAuth(`/api/requests`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ requester_id: user.id, action: 'delete', table_name: table, record_id: id, new_data: null })
@@ -706,7 +736,7 @@ window.requestDelete = async (table, id) => {
 };
 
 window.approveRequest = async (id) => {
-  await fetch(`/api/requests/approve/${id}`, { method: 'POST' });
+  await fetchAuth(`/api/requests/approve/${id}`, { method: 'POST' });
   alert('Approved');
   showPendingRequests();
 };
@@ -772,7 +802,7 @@ window.editSupervisor = async (id, name, username, client_id, site_name) => {
 
 window.deleteSupervisor = async (id) => {
   if (confirm(`Delete Security Supervisor ID ${id}?`)) {
-    const response = await fetch(`/api/security-supervisors/delete/${id}`, { method: 'DELETE' });
+    const response = await fetchAuth(`/api/security-supervisors/delete/${id}`, { method: 'DELETE' });
     if (response.ok) {
       alert('Supervisor deleted');
       showTable('security_supervisors');
@@ -873,14 +903,14 @@ window.resetSupervisorPassword = (id, username) => {
 
 async function adminLookupUserId(role, username) {
   const qs = new URLSearchParams({ role, username });
-  const r = await fetch(`/api/auth/lookup-user?${qs.toString()}`);
+  const r = await fetchAuth(`/api/auth/lookup-user?${qs.toString()}`);
   const data = await r.json().catch(()=> ({}));
   if (!r.ok) throw new Error(data.error || 'Lookup failed');
   return data; // { ok:true, id, role, username }
 }
 
 async function adminResetPassword(userId, role, newPassword) {
-  const r = await fetch('/api/auth/admin/reset-password', {
+  const r = await fetchAuth('/api/auth/admin/reset-password', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ userId, role, newPassword })
@@ -1270,7 +1300,7 @@ function showClientProfile(cli, invoicesAll) {
 
 async function safeGet(url) {
   try {
-    const r = await fetch(url, { credentials: 'include' });
+    const r = await fetchAuth(url, { credentials: 'include' });
      if (!r.ok) throw new Error(await r.text());
      return await r.json();
    } catch (e) {
@@ -1360,4 +1390,4 @@ function parseAsDateOrMonth(s) {
   }
   const t = Date.parse(s);
   return isNaN(t) ? null : new Date(t);
-}
+}}

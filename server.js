@@ -21,19 +21,20 @@ dotenv.config();
 
 const app = express();
 
-
-// then later, before routes:
+// IMPORTANT: set this to your frontend origin (exact, no trailing slash)
 const FRONTEND_ORIGIN = 'https://pgs-erp-2025-1.onrender.com';
 
+// CORS: allow credentials and exact origin (do NOT use origin: '*')
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true); // allow same-origin or non-browser requests
+    // allow non-browser (curl) requests with no origin
+    if (!origin) return cb(null, true);
     if (origin === FRONTEND_ORIGIN) return cb(null, true);
     return cb(new Error('CORS not allowed'), false);
   },
   credentials: true,
   methods: ['GET','POST','PUT','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 }));
 
 // Behind Render's proxy, this is REQUIRED for secure cookies to be set
@@ -51,23 +52,27 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
+// Session cookie must allow cross-site (frontend -> backend on different origin)
 app.use(session({
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
-   httpOnly: true,                 // not readable by JS
-   sameSite: 'lax',                // works across normal GET navigations
-   secure: process.env.NODE_ENV === 'production', // set on HTTPS
-   maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
- }
+    httpOnly: true,
+    sameSite: 'none',                    // important for cross-site cookies
+    secure: NODE_ENV === 'production',   // true on Render (HTTPS)
+    maxAge: 7 * 24 * 60 * 60 * 1000      // 7 days
+  }
 }));
 
-
-// Only protect /api; allow /api/auth/login and /api/auth/current-user
+// Only protect /api; allow unauthenticated access to login and current-user endpoints
 const requireAuth = (req, res, next) => {
+  // when mounted at /api, req.path will be like '/auth/login' or '/auth/current-user'
   if (req.path === '/auth/login' || req.path === '/auth/current-user') return next();
-  if (!req.session.user) return res.status(401).json({ error: 'Unauthorized' });
+  if (!req.session || !req.session.user) {
+    // Return JSON 401 for API callers (do not redirect)
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
   next();
 };
 
@@ -78,23 +83,6 @@ async function bootstrap() {
 
   // 2) Register middleware AFTER DB is ready
   app.use('/api', requireAuth);
-
-  // comment out or remove: import cors from 'cors';
-
-// at top of server.js, after `const app = express()` (or create app first)
-const FRONTEND_ORIGIN = 'https://pgs-erp-2025-1.onrender.com';
-
-app.use((req, res, next) => {
-  const origin = req.headers.origin || FRONTEND_ORIGIN;
-  // set exact origin (avoid '*') if you need credentials
-  res.setHeader('Access-Control-Allow-Origin', FRONTEND_ORIGIN);
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-  if (req.method === 'OPTIONS') return res.status(204).end();
-  next();
-});
-
 
   // 3) Register routes (routers must not run queries at import time)
   app.use('/api/auth', authRoutes);
