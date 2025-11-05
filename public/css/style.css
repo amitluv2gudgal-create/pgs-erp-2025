@@ -1,5 +1,61 @@
 /* style-new.css – Modern ERP Look */
 
+/* --- Normalize & Box Model (add this at top) --- */
+html, body {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*, *::before, *::after {
+  box-sizing: inherit;
+}
+
+/* Table & form normalization to avoid layout jumps */
+.table, table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed; /* important — prevents column jumping */
+}
+
+.table th, .table td, th, td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap; /* mobile will be handled in media query below */
+  padding: 8px 10px;
+}
+
+/* Responsive: allow wrapping on small screens */
+@media (max-width: 780px) {
+  .table th, .table td, th, td {
+    white-space: normal;
+  }
+  .responsive-table { overflow-x: auto; }
+}
+
+/* Category pill used in client rows */
+.category-pill {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  background: #f0f0f0;
+  margin-right: 4px;
+}
+
+/* Ensure your "table-container" blocks are consistent */
+[id^="table-container-"] {
+  display: none;
+}
+[id^="table-container-"].active {
+  display: block;
+}
+
+
 body {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   margin: 0;

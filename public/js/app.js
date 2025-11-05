@@ -7,6 +7,8 @@ import { loadInvoices } from './invoices.js';
 import { loadSalaries } from './salaries.js';
 import { loadRequests } from './requests.js';
 
+function getId(row) { return row.id ?? row.client_id ?? row.employee_id ?? null; }
+
 // ✅ FIX: spread opts correctly + always include cookies
 const fetchAuth = (url, opts = {}) => fetch(url, { credentials: 'include', ...opts });
 
@@ -19,13 +21,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
   user = await res.json();
+  
+  window.user = user;
   if (!user || typeof user.role === 'undefined') {
     console.error('User data is invalid or missing role:', user);
     window.location.href = '/login.html';
     return;
   }
+
   const content = document.getElementById('content');
   content.innerHTML = `<h2>Welcome, ${user.role}</h2>`;
+  addAdminResetAnyPasswordButton();
+
 
   if (user.role !== 'security_supervisor') {
     content.innerHTML += '<button onclick="showTable(\'clients\')">View Clients</button>';
@@ -74,15 +81,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  document.getElementById('logoutBtn').addEventListener('click', async () => {
-    try {
-      await fetchAuth('/api/auth/logout', { method: 'POST' });
-    } catch (err) {
-      console.error('Logout error:', err);
-    }
-    window.location.href = '/login.html';
-  });
-});
+    const logoutEl = document.getElementById('logoutBtn');
+  if (logoutEl && !logoutEl.dataset.bound) {
+    logoutEl.addEventListener('click', async (e) => {
+      e.preventDefault();
+      logoutEl.disabled = true;
+      try {
+        await fetchAuth('/api/auth/logout', { method: 'POST' });
+      } catch (err) {
+        console.error('Logout error:', err);
+      } finally {
+        // always redirect to login after attempting logout
+        window.location.href = '/login.html';
+      }
+    });
+    logoutEl.dataset.bound = '1';
+  }
 
 window.showForm = (type) => {
   if (type === 'client') window.showClientForm && window.showClientForm();
@@ -844,12 +858,10 @@ window.resetSupervisorPassword = (id, username) => {
 // ---------- APPEND THIS AT THE END OF public/js/app.js ----------
 
 // Add the Admin button after dashboard renders (call this once after user is set)
-(function addAdminResetAnyPasswordButton() {
+function addAdminResetAnyPasswordButton() {
   const content = document.getElementById('content');
   if (!content || !window.user) return;
   if (window.user.role !== 'admin') return;
-
-  // Avoid duplicates if content rerenders
   if (!document.getElementById('btnAdminResetAny')) {
     const btn = document.createElement('button');
     btn.id = 'btnAdminResetAny';
@@ -857,7 +869,7 @@ window.resetSupervisorPassword = (id, username) => {
     btn.onclick = showAdminResetAnyPassword;
     content.appendChild(btn);
   }
-})();
+}
 
 async function adminLookupUserId(role, username) {
   const qs = new URLSearchParams({ role, username });
@@ -1348,4 +1360,4 @@ function parseAsDateOrMonth(s) {
   }
   const t = Date.parse(s);
   return isNaN(t) ? null : new Date(t);
-}
+}})
