@@ -87,18 +87,35 @@ router.post('/login', async (req, res) => {
 });
 
 router.post('/logout', (req, res) => {
-  // if using session
-  req.session?.destroy((err) => {
-    if (err) {
-      console.error('[auth/logout] session destroy error:', err);
-      // still clear cookie client-side
+  try {
+    console.log('[auth/logout] incoming. cookies=', req.headers.cookie);
+    console.log('[auth/logout] session exists=', !!req.session, 'session=', req.session);
+
+    // Try to destroy session if present
+    if (req.session) {
+      req.session.destroy((err) => {
+        if (err) {
+          console.error('[auth/logout] session.destroy error:', err);
+          // still try to clear cookie
+          res.clearCookie('pgs_sid', { path: '/', sameSite: 'none', secure: process.env.NODE_ENV === 'production' });
+          // return success to client to avoid UX failure
+          return res.status(200).json({ ok: true, note: 'session destroyed with error, cookie cleared' });
+        }
+        // success: clear cookie and return OK
+        res.clearCookie('pgs_sid', { path: '/', sameSite: 'none', secure: process.env.NODE_ENV === 'production' });
+        return res.status(200).json({ ok: true });
+      });
+    } else {
+      // No session found on server: still clear cookie on client (in case cookie present but server lost session)
       res.clearCookie('pgs_sid', { path: '/', sameSite: 'none', secure: process.env.NODE_ENV === 'production' });
-      return res.status(500).json({ error: 'Logout failed' });
+      return res.status(200).json({ ok: true, note: 'no session on server; cookie cleared' });
     }
-    // clear cookie and return JSON OK
+  } catch (err) {
+    console.error('[auth/logout] unexpected error:', err);
+    // best-effort: clear cookie for client experience
     res.clearCookie('pgs_sid', { path: '/', sameSite: 'none', secure: process.env.NODE_ENV === 'production' });
-    return res.json({ ok: true });
-  });
+    return res.status(200).json({ ok: true, note: 'error-handled, cookie cleared' });
+  }
 });
 
 // ================== LOGOUT ==================
