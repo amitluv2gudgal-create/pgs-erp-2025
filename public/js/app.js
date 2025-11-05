@@ -7,42 +7,222 @@ import { loadInvoices } from './invoices.js';
 import { loadSalaries } from './salaries.js';
 import { loadRequests } from './requests.js';
 
-// small debug + logout trigger wrapper - paste into public/js/app.js
-const fetchAuth = (url, opts = {}) => fetch(url, { credentials: 'include', ...opts });
+let user; // Declare user globally
 
-async function debugLogoutOnce() {
-  console.log('[PGS-ERP] debugLogoutOnce: attempting logout...');
+// public/js/app.js
+// Full patched file. Highlights:
+// - uses window.fetch via fetchAuth (no recursion)
+// - debug overlay that shows logs in DOM (so logs don't vanish)
+// - guarded initialization (doesn't auto-run on login.html)
+// - robust logout handler with retries and verbose logs
+// - shows minimal dashboard UI if user present
 
-  try {
-    // This will show the browser-side attempt even if response is blocked
-    const respPromise = fetchAuth('/api/auth/logout', {
-      method: 'POST',
-      headers: { 'Accept': 'application/json' }
-    });
+// ---------- Debug overlay helper (so you can read logs even if console disappears) ----------
+(function createDebugOverlay() {
+  if (document.getElementById('pgs-debug-overlay')) return;
+  const o = document.createElement('div');
+  o.id = 'pgs-debug-overlay';
+  o.style.position = 'fixed';
+  o.style.right = '10px';
+  o.style.top = '10px';
+  o.style.zIndex = 99999;
+  o.style.maxWidth = '420px';
+  o.style.maxHeight = '60vh';
+  o.style.overflowY = 'auto';
+  o.style.background = 'rgba(0,0,0,0.8)';
+  o.style.color = 'white';
+  o.style.fontSize = '12px';
+  o.style.padding = '8px';
+  o.style.borderRadius = '6px';
+  o.style.boxShadow = '0 2px 10px rgba(0,0,0,0.6)';
+  o.style.fontFamily = 'monospace';
+  o.style.whiteSpace = 'pre-wrap';
+  o.innerText = 'PGS-ERP debug overlay\n';
+  document.documentElement.appendChild(o);
+  // click to clear
+  o.addEventListener('click', () => o.innerText = 'PGS-ERP debug overlay\n(click to clear)');
 
-    console.log('[PGS-ERP] logout request sent, awaiting response (may be preflighted)');
-
-    const resp = await respPromise;
-    console.log('[PGS-ERP] logout response status:', resp.status);
-    console.log('[PGS-ERP] logout response headers:', [...resp.headers.entries()]);
-
-    const ct = resp.headers.get('content-type') || '';
-    if (ct.includes('application/json')) {
-      const data = await resp.json();
-      console.log('[PGS-ERP] logout json body:', data);
-    } else {
-      const txt = await resp.text();
-      console.log('[PGS-ERP] logout non-json body (truncated):', txt.slice(0,200));
+  // expose a simple logger accessible from code
+  window.pgsDebugLog = function(...args) {
+    console.log(...args);
+    try {
+      const s = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+      o.innerText += '\n' + s;
+      // keep bottom visible
+      o.scrollTop = o.scrollHeight;
+    } catch (e) {
+      // ignore overlay errors
     }
-  } catch (err) {
-    console.error('[PGS-ERP] logout fetch error (network/CORS):', err);
-  }
+  };
+})();
+
+// small alias for convenience
+const dbg = window.pgsDebugLog;
+
+// ---------- Safe fetch wrapper (DO NOT shadow global fetch) ----------
+const nativeFetch = window.fetch.bind(window);
+const fetchAuth = (url, opts = {}) => nativeFetch(url, { credentials: 'include', ...opts });
+
+// ---------- Utilities ----------
+function safeJson(resp) {
+  const ct = resp.headers.get('content-type') || '';
+  if (ct.includes('application/json')) return resp.json();
+  return resp.text().then(t => ({ nonJson: true, text: t }));
 }
 
-// call this for test (or wire to your logout button for debugging)
-window.pgsDebugLogout = debugLogoutOnce;
+// ---------- Guard so app.js doesn't run on login page ----------
+const isLoginPage = location.pathname.endsWith('/login.html') || location.pathname.endsWith('/login');
 
-let user; // Declare user globally
+dbg('[PGS-ERP] booting app.js. isLoginPage=', isLoginPage, 'pathname=', location.pathname);
+
+// If on login page, do not run full dashboard init. But keep debug logger available.
+if (!isLoginPage) {
+  document.addEventListener('DOMContentLoaded', async () => {
+    dbg('[PGS-ERP] DOMContentLoaded - checking current user');
+
+    // Try current-user
+    try {
+      const resp = await fetchAuth('/api/auth/current-user', { method: 'GET', headers: { 'Accept': 'application/json' }});
+      dbg('[PGS-ERP] /api/auth/current-user status=', resp.status);
+      if (!resp.ok) {
+        dbg('[PGS-ERP] Not authenticated or server returned non-200 for current-user. status=', resp.status);
+        showNotAuthenticated();
+        return;
+      }
+
+      const data = await safeJson(resp);
+      if (data && data.nonJson) {
+        dbg('[PGS-ERP] current-user returned non-json. content starts:', data.text.slice(0, 200));
+        showNotAuthenticated();
+        return;
+      }
+
+      // Assume JSON user object
+      const user = data;
+      dbg('[PGS-ERP] current-user ok:', user);
+
+      // Minimal dashboard rendering for testing
+      renderDashboard(user);
+
+    } catch (err) {
+      dbg('[PGS-ERP] Network/CORS error fetching current-user:', err);
+      // Show an on-page error so you can read it
+      const content = document.getElementById('content') || document.body;
+      const msg = document.createElement('div');
+      msg.style.background = '#fee';
+      msg.style.color = '#900';
+      msg.style.padding = '12px';
+      msg.style.margin = '12px';
+      msg.innerText = 'Network/CORS error contacting server. Check server logs. See debug overlay (top-right).';
+      content.prepend(msg);
+    }
+  });
+}
+
+// ---------- UI helpers ----------
+function showNotAuthenticated() {
+  const content = document.getElementById('content') || document.body;
+  content.innerHTML = `
+    <div style="padding:20px;">
+      <h3>You are not logged in.</h3>
+      <a href="/login.html">Go to Login</a>
+    </div>`;
+  dbg('[PGS-ERP] showing not-authenticated UI');
+}
+
+function renderDashboard(user) {
+  const content = document.getElementById('content') || document.body;
+  content.innerHTML = `
+    <div style="padding:16px;">
+      <h2>PGS-ERP Dashboard</h2>
+      <p>Logged in as: <strong>${user.username || user.name || user.role || 'user'}</strong></p>
+      <div style="margin-top:10px;">
+        <button id="logoutBtn" style="padding:10px 14px; border-radius:6px;">Logout</button>
+      </div>
+      <div id="pgs-dashboard-area" style="margin-top:18px;"></div>
+    </div>
+  `;
+
+  // Attach logout
+  attachLogoutHandler();
+
+  // Additional app init: you may call your original UI init functions here
+  // e.g., loadClients(), loadEmployees(), etc. But keep them after authentication.
+  try {
+    if (typeof window.loadClients === 'function') window.loadClients();
+  } catch(e) { dbg('[PGS-ERP] loadClients error', e); }
+}
+
+// ---------- Logout handler with retries ----------
+function attachLogoutHandler() {
+  const selectors = ['#logoutBtn', 'button.logout', '.logout-btn'];
+  let btn = null;
+  for (const s of selectors) {
+    btn = document.querySelector(s);
+    if (btn) break;
+  }
+
+  if (!btn) {
+    dbg('[PGS-ERP] Logout button not found yet; will retry in 400ms');
+    setTimeout(attachLogoutHandler, 400);
+    return;
+  }
+
+  if (btn.dataset.pgsLogoutAttached === '1') {
+    dbg('[PGS-ERP] logout handler already attached');
+    return;
+  }
+  btn.dataset.pgsLogoutAttached = '1';
+
+  btn.addEventListener('click', async (ev) => {
+    ev.preventDefault();
+    dbg('[PGS-ERP] Logout clicked — calling /api/auth/logout');
+
+    try {
+      const resp = await fetchAuth('/api/auth/logout', { method: 'POST', headers: { 'Accept': 'application/json' }});
+      dbg('[PGS-ERP] /api/auth/logout status=', resp.status);
+      dbg('[PGS-ERP] /api/auth/logout headers=', [...resp.headers.entries()]);
+
+      const body = await safeJson(resp);
+      dbg('[PGS-ERP] /api/auth/logout body=', body);
+
+      if (resp.ok) {
+        dbg('[PGS-ERP] logout ok — redirecting to login');
+        // force remove cookie client-side by setting expired cookie for the session name
+        try { document.cookie = 'pgs_sid=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT'; } catch(e) {}
+        window.location.href = '/login.html';
+      } else {
+        dbg('[PGS-ERP] logout returned non-ok. showing message');
+        alert('Logout failed: ' + (body && body.error ? body.error : 'status ' + resp.status));
+      }
+    } catch (err) {
+      dbg('[PGS-ERP] Network error during logout:', err);
+      alert('Network error during logout — check debug overlay and server logs.');
+    }
+  });
+
+  dbg('[PGS-ERP] logout handler attached to', btn);
+}
+
+// ---------- Expose debug logout for manual test ----------
+window.pgsDebugLogout = async function() {
+  dbg('[PGS-ERP] pgsDebugLogout invoked');
+  try {
+    const resp = await fetchAuth('/api/auth/logout', { method: 'POST', headers: { 'Accept': 'application/json' }});
+    dbg('[PGS-ERP] debug logout status=', resp.status);
+    const body = await safeJson(resp);
+    dbg('[PGS-ERP] debug logout body=', body);
+  } catch (err) {
+    dbg('[PGS-ERP] debug logout error=', err);
+  }
+};
+
+// ---------- Export or attach any existing modules stubs to maintain compatibility ---------
+// If your other modules expect functions on window, keep them:
+// window.loadClients = ... etc. (not modified here)
+
+dbg('[PGS-ERP] app.js loaded (patched).');
+
 
 if (!location.pathname.endsWith('/login.html') && !location.pathname.endsWith('/login')) {
   document.addEventListener('DOMContentLoaded', async () => {
@@ -1424,70 +1604,4 @@ function parseAsDateOrMonth(s) {
   return isNaN(t) ? null : new Date(t);
 }}
 
-
-// Robust attach: works even if button is rendered later
-function attachLogoutHandler() {
-  // Try common ids/classes; adjust if your markup differs
-  const selectors = ['#logoutBtn', 'button.logout', '.logout-btn'];
-  let btn = null;
-  for (const s of selectors) {
-    btn = document.querySelector(s);
-    if (btn) break;
-  }
-
-  if (!btn) {
-    console.log('[PGS-ERP] Logout button not found yet. Will retry in 500ms.');
-    // try again later (useful if DOM built after)
-    setTimeout(attachLogoutHandler, 500);
-    return;
-  }
-
-  // If handler already set, avoid double-wire
-  if (btn.dataset.logoutAttached === '1') {
-    console.log('[PGS-ERP] Logout handler already attached.');
-    return;
-  }
-  btn.dataset.logoutAttached = '1';
-
-  btn.addEventListener('click', async (ev) => {
-    ev.preventDefault();
-    console.log('[PGS-ERP] Logout clicked — calling /api/auth/logout');
-
-    try {
-      const resp = await fetchAuth('/api/auth/logout', { method: 'POST', headers: { 'Accept': 'application/json' }});
-
-      console.log('[PGS-ERP] /api/auth/logout response status:', resp.status, 'headers:', [...resp.headers.entries()]);
-
-      // handle JSON responses safely
-      const ct = resp.headers.get('content-type') || '';
-      let body = null;
-      if (ct.includes('application/json')) {
-        body = await resp.json();
-        console.log('[PGS-ERP] /api/auth/logout json body:', body);
-      } else {
-        body = await resp.text();
-        console.log('[PGS-ERP] /api/auth/logout non-json body (truncated):', body.slice(0,200));
-      }
-
-      if (resp.ok) {
-        // destroy client-side UX and go to login
-        console.log('[PGS-ERP] Logout OK — redirecting to login');
-        window.location.href = '/login.html';
-      } else {
-        console.warn('[PGS-ERP] Logout failed:', resp.status, body);
-        alert('Logout failed. Check console/network logs.');
-      }
-    } catch (err) {
-      console.error('[PGS-ERP] Network error during logout:', err);
-      alert('Network error during logout. Check console for details.');
-    }
-  });
-}
-
-// start attaching after DOM ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', attachLogoutHandler);
-} else {
-  attachLogoutHandler();
-}
 
