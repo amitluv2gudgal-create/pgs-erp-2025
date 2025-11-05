@@ -83,6 +83,53 @@ async function bootstrap() {
   await initDB();
   console.log('[db] Ready at:', DB_PATH);
 
+  // --- Explicit, pre-auth logout endpoint (paste near top of server.js) ---
+const FRONTEND_ORIGIN = 'https://pgs-erp-2025-1.onrender.com';
+
+// handle preflight & explicit logout outside of auth guard
+app.options('/api/auth/logout', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', FRONTEND_ORIGIN);
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  return res.status(204).end();
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  // Always return JSON and proper CORS headers to avoid CORB
+  res.setHeader('Access-Control-Allow-Origin', FRONTEND_ORIGIN);
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Content-Type', 'application/json');
+
+  console.log('[auth/logout] incoming request. cookies=', req.headers.cookie ?? '(none)');
+
+  // Clear cookie using the exact name you set in express-session
+  const cookieName = 'pgs_sid'; // change if you used a different name
+  try {
+    if (req.session) {
+      // best-effort destroy
+      req.session.destroy((err) => {
+        if (err) {
+          console.error('[auth/logout] session destroy error:', err);
+          res.clearCookie(cookieName, { path: '/', sameSite: 'none', secure: process.env.NODE_ENV === 'production' });
+          return res.status(200).json({ ok: true, note: 'destroy-error, cookie-cleared' });
+        }
+        res.clearCookie(cookieName, { path: '/', sameSite: 'none', secure: process.env.NODE_ENV === 'production' });
+        return res.status(200).json({ ok: true });
+      });
+    } else {
+      // no session object on server — still clear cookie and return 200
+      res.clearCookie(cookieName, { path: '/', sameSite: 'none', secure: process.env.NODE_ENV === 'production' });
+      return res.status(200).json({ ok: true, note: 'no-server-session, cookie-cleared' });
+    }
+  } catch (err) {
+    console.error('[auth/logout] unexpected error:', err);
+    res.clearCookie(cookieName, { path: '/', sameSite: 'none', secure: process.env.NODE_ENV === 'production' });
+    return res.status(200).json({ ok: true, note: 'error-handled, cookie-cleared' });
+  }
+});
+
+
   app.use('/api/auth', authRoutes);
 
   // 2) Register middleware AFTER DB is ready

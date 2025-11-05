@@ -7,8 +7,44 @@ import { loadInvoices } from './invoices.js';
 import { loadSalaries } from './salaries.js';
 import { loadRequests } from './requests.js';
 
-// ✅ FIX: spread opts correctly + always include cookies
+// small debug + logout trigger wrapper - paste into public/js/app.js
 const fetchAuth = (url, opts = {}) => fetch(url, { credentials: 'include', ...opts });
+
+async function debugLogoutOnce() {
+  console.log('[PGS-ERP] debugLogoutOnce: attempting logout...');
+
+  try {
+    // This will show the browser-side attempt even if response is blocked
+    const respPromise = fetchAuth('/api/auth/logout', {
+      method: 'POST',
+      headers: { 'Accept': 'application/json' }
+    });
+
+    console.log('[PGS-ERP] logout request sent, awaiting response (may be preflighted)');
+
+    const resp = await respPromise;
+    console.log('[PGS-ERP] logout response status:', resp.status);
+    console.log('[PGS-ERP] logout response headers:', [...resp.headers.entries()]);
+
+    const ct = resp.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      const data = await resp.json();
+      console.log('[PGS-ERP] logout json body:', data);
+    } else {
+      const txt = await resp.text();
+      console.log('[PGS-ERP] logout non-json body (truncated):', txt.slice(0,200));
+    }
+  } catch (err) {
+    console.error('[PGS-ERP] logout fetch error (network/CORS):', err);
+  }
+}
+
+// call this for test (or wire to your logout button for debugging)
+window.pgsDebugLogout = debugLogoutOnce;
+
+
+// ✅ FIX: spread opts correctly + always include cookies
+const fetch = (url, opts = {}) => fetch(url, { credentials: 'include', ...opts });
 
 let user; // Declare user globally
 
