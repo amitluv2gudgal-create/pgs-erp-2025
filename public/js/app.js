@@ -42,10 +42,6 @@ async function debugLogoutOnce() {
 // call this for test (or wire to your logout button for debugging)
 window.pgsDebugLogout = debugLogoutOnce;
 
-
-// ✅ FIX: spread opts correctly + always include cookies
-const fetch = (url, opts = {}) => fetch(url, { credentials: 'include', ...opts });
-
 let user; // Declare user globally
 
 if (!location.pathname.endsWith('/login.html') && !location.pathname.endsWith('/login')) {
