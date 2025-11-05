@@ -1,6 +1,5 @@
 // server.js
 import express from 'express';
-import cors from 'cors';
 import session from 'express-session';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
@@ -76,6 +75,23 @@ async function bootstrap() {
 
   // 2) Register middleware AFTER DB is ready
   app.use('/api', requireAuth);
+
+  // comment out or remove: import cors from 'cors';
+
+// at top of server.js, after `const app = express()` (or create app first)
+const FRONTEND_ORIGIN = 'https://pgs-erp-2025-1.onrender.com';
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin || FRONTEND_ORIGIN;
+  // set exact origin (avoid '*') if you need credentials
+  res.setHeader('Access-Control-Allow-Origin', FRONTEND_ORIGIN);
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  next();
+});
+
 
   // 3) Register routes (routers must not run queries at import time)
   app.use('/api/auth', authRoutes);
