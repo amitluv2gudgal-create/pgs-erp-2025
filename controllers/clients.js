@@ -1,167 +1,215 @@
 // controllers/clients.js
 import express from 'express';
 import { query, run } from '../db.js';
-import { createRequest } from './requests.js';
 
 const router = express.Router();
 
-// Get all clients (view for all roles)
-router.get('/', async (req, res) => {
+// Get all clients (include categories summary)
+router.get('/', async (_req, res) => {
   try {
-    const clients = await query('SELECT * FROM clients');
-    for (let client of clients) {
+    const clients = await query('SELECT * FROM clients ORDER BY id DESC');
+    for (const client of clients) {
       try {
-        const cats = await query('SELECT category, monthly_rate FROM client_categories WHERE client_id = ?', [client.id]);
-        client.categories = cats.length > 0 ? cats.map(c => `${c.category}: ₹${c.monthly_rate}`).join(', ') : 'No categories';
-      } catch (catErr) {
-        console.warn(`No categories found for client ${client.id}:`, catErr.message);
+        const cats = await query(
+          'SELECT category, monthly_rate FROM client_categories WHERE client_id = ?',
+          [client.id]
+        );
+        client.categories = cats.length
+          ? cats.map(c => `${c.category}: ₹${c.monthly_rate}`).join(', ')
+          : 'No categories';
+      } catch (e) {
         client.categories = 'No categories';
       }
     }
     res.json(clients);
   } catch (err) {
     console.error('Error fetching clients:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message || 'Server error' });
   }
 });
 
-// Create client (accountant only)
+// Create client (admin/accountant)
 router.post('/', async (req, res) => {
-  if (req.session.user.role !== 'accountant') return res.status(403).json({ error: 'Forbidden' });
-  const { name, address, telephone, email, cgst, sgst } = req.body;
   try {
-    const { id } = await run(
-      'INSERT INTO clients (name, address, telephone, email, cgst, sgst) VALUES (?, ?, ?, ?, ?, ?)',
-      [name, address, telephone, email, cgst, sgst]
-    );
-    res.json({ id });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Add category to client (accountant)
-router.post('/:id/categories', async (req, res) => {
-  if (req.session.user.role !== 'accountant') return res.status(403).json({ error: 'Forbidden' });
-  const { category, monthly_rate } = req.body;
-  try {
-    await run(
-      'INSERT INTO client_categories (client_id, category, monthly_rate) VALUES (?, ?, ?)',
-      [req.params.id, category, monthly_rate]
-    );
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-export async function loadClients() {
-  try {
-    const response = await fetch('/api/clients');
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    if (!req.session?.user || !['admin', 'accountant'].includes(req.session.user.role)) {
+      return res.status(403).json({ error: 'Forbidden' });
     }
-    const clients = await response.json();
-    console.log('Loaded clients:', clients); // Debug log
-    return clients;
-  } catch (err) {
-    console.error('Error loading clients:', err);
-    return []; // Return empty array on error
-  }
-}
-
-// console.log('Clients query result:', await query('SELECT * FROM clients'));
-
-// Edit client (request approval if not admin)
-router.put('/:id', async (req, res) => {
-  const role = req.session.user.role;
-  if (role === 'admin') return res.status(403).json({ error: 'Admin cannot edit directly' });
-  if (role !== 'accountant') return res.status(403).json({ error: 'Forbidden' });
-  try {
-    await createRequest(req.session.user.id, 'edit', 'clients', req.params.id, JSON.stringify(req.body));
-    res.json({ success: true, message: 'Edit request created' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Delete client (request approval)
-router.delete('/:id', async (req, res) => {
-  const role = req.session.user.role;
-  if (role === 'admin') return res.status(403).json({ error: 'Admin cannot delete directly' });
-  if (role !== 'accountant') return res.status(403).json({ error: 'Forbidden' });
-  try {
-    await createRequest(req.session.user.id, 'delete', 'clients', req.params.id, null);
-    res.json({ success: true, message: 'Delete request created' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ====== DIRECT EDIT SUPPORT FOR MODALS ======
-
-// Get single client by ID (for edit modal pre-fill)
-router.get('/:id/direct', async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
-    const rows = await query('SELECT * FROM clients WHERE id = ?', [id]);
-    if (!rows.length) return res.status(404).json({ error: 'Client not found' });
-    res.json(rows[0]);
-  } catch (err) {
-    console.error('GET /clients/:id/direct error:', err);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// Update client directly (admin only)
-router.put('/:id/direct', async (req, res) => {
-  if (req.session.user.role !== 'admin') return res.status(403).json({ error: 'Only admin can edit directly' });
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
-
-    const rows = await query('SELECT * FROM clients WHERE id = ?', [id]);
-    if (!rows.length) return res.status(404).json({ error: 'Client not found' });
-    const current = rows[0];
 
     const {
-      name = current.name,
-      address = current.address,
-      contact = current.contact,
-      telephone = current.telephone,
-      email = current.email,
-      cgst = current.cgst,
-      sgst = current.sgst
+      name,
+      address_line1,
+      address_line2,
+      po_dated,
+      state,
+      district,
+      telephone,
+      email,
+      gst_number,
+      cgst = 0,
+      sgst = 0,
+      igst = 0
     } = req.body || {};
 
-    await run(
-      `UPDATE clients
-         SET name = ?, address = ?, contact = ?, telephone = ?, email = ?,
-             cgst = ?, sgst = ?
-       WHERE id = ?`,
-      [name, address, contact, telephone, email, cgst, sgst, id]
-    );
-    res.json({ ok: true, message: 'Client updated directly' });
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'Client name is required' });
+    }
+
+    // Use parameterized insert
+    const sql = `INSERT INTO clients
+      (name, address_line1, address_line2, po_dated, state, district, telephone, email, gst_number, cgst, sgst, igst)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+    const params = [
+      String(name).trim(),
+      address_line1 || null,
+      address_line2 || null,
+      po_dated || null,
+      state || null,
+      district || null,
+      telephone || null,
+      email || null,
+      gst_number || null,
+      Number(cgst) || 0,
+      Number(sgst) || 0,
+      (typeof igst !== 'undefined' && igst !== null && igst !== '') ? Number(igst) : null
+    ];
+
+    const insertResult = await run(sql, params);
+
+    // run wrappers differ: try common return shapes
+    const insertId = insertResult?.lastID ?? insertResult?.insertId ?? insertResult?.id ?? null;
+
+    if (!insertId) {
+      // best-effort: if no insertId, try to find by unique fields (name + telephone + email) as a fallback
+      const fallbackRows = await query(
+        `SELECT * FROM clients WHERE name = ? AND (telephone = ? OR email = ?) ORDER BY id DESC LIMIT 1`,
+        [String(name).trim(), telephone || '', email || '']
+      );
+      if (fallbackRows && fallbackRows.length) {
+        return res.status(201).json(fallbackRows[0]);
+      }
+      // otherwise return success without object
+      return res.status(201).json({ ok: true });
+    }
+
+    const rows = await query('SELECT * FROM clients WHERE id = ?', [insertId]);
+    return res.status(201).json(rows[0] || { ok: true, id: insertId });
   } catch (err) {
-    console.error('PUT /clients/:id/direct error:', err);
-    res.status(500).json({ error: 'Server error' });
+    console.error('Create client error:', err);
+    return res.status(500).json({ error: err.message || 'Server error' });
   }
 });
 
-// ==== GET one client by ID (for edit modal pre-fill) ====
+// Add category to client (admin/accountant)
+router.post('/:id/categories', async (req, res) => {
+  try {
+    if (!req.session?.user || !['admin', 'accountant'].includes(req.session.user.role)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const id = Number(req.params.id);
+    const { category, monthly_rate } = req.body || {};
+    if (!id || !category || typeof monthly_rate === 'undefined') {
+      return res.status(400).json({ error: 'Client ID, category and monthly_rate are required' });
+    }
+    await run(
+      'INSERT INTO client_categories (client_id, category, monthly_rate) VALUES (?, ?, ?)',
+      [id, String(category).trim(), Number(monthly_rate)]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Add category error:', err);
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
+
+// Get one client by ID
 router.get('/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
     const rows = await query('SELECT * FROM clients WHERE id = ?', [id]);
-    if (!rows.length) return res.status(404).json({ error: 'Client not found' });
+    if (!rows || !rows.length) return res.status(404).json({ error: 'Client not found' });
     res.json(rows[0]);
   } catch (err) {
     console.error('GET /clients/:id error:', err);
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: err.message || 'Server error' });
   }
 });
 
+// Update client (admin/accountant)
+router.put('/:id', async (req, res) => {
+  try {
+    if (!req.session?.user || !['admin', 'accountant'].includes(req.session.user.role)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+
+    const currentRows = await query('SELECT * FROM clients WHERE id = ?', [id]);
+    if (!currentRows || !currentRows.length) return res.status(404).json({ error: 'Client not found' });
+    const current = currentRows[0];
+
+    const {
+      name = current.name,
+      address_line1 = current.address_line1,
+      address_line2 = current.address_line2,
+      po_dated = current.po_dated,
+      state = current.state,
+      district = current.district,
+      telephone = current.telephone,
+      email = current.email,
+      gst_number = current.gst_number,
+      cgst = current.cgst,
+      sgst = current.sgst,
+      igst = current.igst
+    } = req.body || {};
+
+    await run(
+      `UPDATE clients
+         SET name = ?, address_line1 = ?, address_line2 = ?, po_dated = ?,
+             state = ?, district = ?, telephone = ?, email = ?, gst_number = ?, cgst = ?, sgst = ?, igst = ?
+       WHERE id = ?`,
+      [
+        String(name).trim(),
+        (address_line1 || null),
+        (address_line2 || null),
+        (po_dated || null),
+        (state || null),
+        (district || null),
+        (telephone || null),
+        (email || null),
+        gst_number || null,
+        Number(cgst) || 0,
+        Number(sgst) || 0,
+        (typeof igst !== 'undefined' && igst !== null && igst !== '') ? Number(igst) : null,
+        id
+      ]
+    );
+
+    const rows = await query('SELECT * FROM clients WHERE id = ?', [id]);
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('PUT /clients/:id error:', err);
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
+
+// Delete client (admin/accountant)
+router.delete('/:id', async (req, res) => {
+  try {
+    if (!req.session?.user || !['admin', 'accountant'].includes(req.session.user.role)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+
+    await run('DELETE FROM clients WHERE id = ?', [id]);
+    await run('DELETE FROM client_categories WHERE client_id = ?', [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE /clients/:id error:', err);
+    res.status(500).json({ error: err.message || 'Server error' });
+  }
+});
 
 export default router;

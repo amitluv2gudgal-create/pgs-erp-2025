@@ -7,265 +7,23 @@ import { loadInvoices } from './invoices.js';
 import { loadSalaries } from './salaries.js';
 import { loadRequests } from './requests.js';
 
+// ✅ FIX: spread opts correctly + always include cookies
+const fetchAuth = (url, opts = {}) => fetch(url, { credentials: 'include', ...opts });
+
 let user; // Declare user globally
 
-// public/js/app.js
-// Full patched file. Highlights:
-// - uses window.fetch via fetchAuth (no recursion)
-// - debug overlay that shows logs in DOM (so logs don't vanish)
-// - guarded initialization (doesn't auto-run on login.html)
-// - robust logout handler with retries and verbose logs
-// - shows minimal dashboard UI if user present
-
-// ---------- Debug overlay helper (so you can read logs even if console disappears) ----------
-(function createDebugOverlay() {
-  if (document.getElementById('pgs-debug-overlay')) return;
-  const o = document.createElement('div');
-  o.id = 'pgs-debug-overlay';
-  o.style.position = 'fixed';
-  o.style.right = '10px';
-  o.style.top = '10px';
-  o.style.zIndex = 99999;
-  o.style.maxWidth = '420px';
-  o.style.maxHeight = '60vh';
-  o.style.overflowY = 'auto';
-  o.style.background = 'rgba(0,0,0,0.8)';
-  o.style.color = 'white';
-  o.style.fontSize = '12px';
-  o.style.padding = '8px';
-  o.style.borderRadius = '6px';
-  o.style.boxShadow = '0 2px 10px rgba(0,0,0,0.6)';
-  o.style.fontFamily = 'monospace';
-  o.style.whiteSpace = 'pre-wrap';
-  o.innerText = 'PGS-ERP debug overlay\n';
-  document.documentElement.appendChild(o);
-  // click to clear
-  o.addEventListener('click', () => o.innerText = 'PGS-ERP debug overlay\n(click to clear)');
-
-  // expose a simple logger accessible from code
-  window.pgsDebugLog = function(...args) {
-    console.log(...args);
-    try {
-      const s = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
-      o.innerText += '\n' + s;
-      // keep bottom visible
-      o.scrollTop = o.scrollHeight;
-    } catch (e) {
-      // ignore overlay errors
-    }
-  };
-})();
-
-// small alias for convenience
-const dbg = window.pgsDebugLog;
-
-// ---------- Safe fetch wrapper (DO NOT shadow global fetch) ----------
-const nativeFetch = window.fetch.bind(window);
-const fetchAuth = (url, opts = {}) => nativeFetch(url, { credentials: 'include', ...opts });
-
-// ---------- Utilities ----------
-function safeJson(resp) {
-  const ct = resp.headers.get('content-type') || '';
-  if (ct.includes('application/json')) return resp.json();
-  return resp.text().then(t => ({ nonJson: true, text: t }));
-}
-
-// ---------- Guard so app.js doesn't run on login page ----------
-const isLoginPage = location.pathname.endsWith('/login.html') || location.pathname.endsWith('/login');
-
-dbg('[PGS-ERP] booting app.js. isLoginPage=', isLoginPage, 'pathname=', location.pathname);
-
-// If on login page, do not run full dashboard init. But keep debug logger available.
-if (!isLoginPage) {
-  document.addEventListener('DOMContentLoaded', async () => {
-    dbg('[PGS-ERP] DOMContentLoaded - checking current user');
-
-    // Try current-user
-    try {
-      const resp = await fetchAuth('/api/auth/current-user', { method: 'GET', headers: { 'Accept': 'application/json' }});
-      dbg('[PGS-ERP] /api/auth/current-user status=', resp.status);
-      if (!resp.ok) {
-        dbg('[PGS-ERP] Not authenticated or server returned non-200 for current-user. status=', resp.status);
-        showNotAuthenticated();
-        return;
-      }
-
-      const data = await safeJson(resp);
-      if (data && data.nonJson) {
-        dbg('[PGS-ERP] current-user returned non-json. content starts:', data.text.slice(0, 200));
-        showNotAuthenticated();
-        return;
-      }
-
-      // Assume JSON user object
-      const user = data;
-      dbg('[PGS-ERP] current-user ok:', user);
-
-      // Minimal dashboard rendering for testing
-      renderDashboard(user);
-
-    } catch (err) {
-      dbg('[PGS-ERP] Network/CORS error fetching current-user:', err);
-      // Show an on-page error so you can read it
-      const content = document.getElementById('content') || document.body;
-      const msg = document.createElement('div');
-      msg.style.background = '#fee';
-      msg.style.color = '#900';
-      msg.style.padding = '12px';
-      msg.style.margin = '12px';
-      msg.innerText = 'Network/CORS error contacting server. Check server logs. See debug overlay (top-right).';
-      content.prepend(msg);
-    }
-  });
-}
-
-// ---------- UI helpers ----------
-function showNotAuthenticated() {
-  const content = document.getElementById('content') || document.body;
-  content.innerHTML = `
-    <div style="padding:20px;">
-      <h3>You are not logged in.</h3>
-      <a href="/login.html">Go to Login</a>
-    </div>`;
-  dbg('[PGS-ERP] showing not-authenticated UI');
-}
-
-function renderDashboard(user) {
-  const content = document.getElementById('content') || document.body;
-  content.innerHTML = `
-    <div style="padding:16px;">
-      <h2>PGS-ERP Dashboard</h2>
-      <p>Logged in as: <strong>${user.username || user.name || user.role || 'user'}</strong></p>
-      <div style="margin-top:10px;">
-        <button id="logoutBtn" style="padding:10px 14px; border-radius:6px;">Logout</button>
-      </div>
-      <div id="pgs-dashboard-area" style="margin-top:18px;"></div>
-    </div>
-  `;
-
-  // Attach logout
-  attachLogoutHandler();
-
-  // Additional app init: you may call your original UI init functions here
-  // e.g., loadClients(), loadEmployees(), etc. But keep them after authentication.
-  try {
-    if (typeof window.loadClients === 'function') window.loadClients();
-  } catch(e) { dbg('[PGS-ERP] loadClients error', e); }
-}
-
-// ---------- Logout handler with retries ----------
-function attachLogoutHandler() {
-  const selectors = ['#logoutBtn', 'button.logout', '.logout-btn'];
-  let btn = null;
-  for (const s of selectors) {
-    btn = document.querySelector(s);
-    if (btn) break;
-  }
-
-  if (!btn) {
-    dbg('[PGS-ERP] Logout button not found yet; will retry in 400ms');
-    setTimeout(attachLogoutHandler, 400);
+document.addEventListener('DOMContentLoaded', async () => {
+  const res = await fetchAuth('/api/auth/current-user');
+  if (!res.ok) {
+    window.location.href = '/login.html';
     return;
   }
-
-  if (btn.dataset.pgsLogoutAttached === '1') {
-    dbg('[PGS-ERP] logout handler already attached');
+  user = await res.json();
+  if (!user || typeof user.role === 'undefined') {
+    console.error('User data is invalid or missing role:', user);
+    window.location.href = '/login.html';
     return;
   }
-  btn.dataset.pgsLogoutAttached = '1';
-
-  btn.addEventListener('click', async (ev) => {
-    ev.preventDefault();
-    dbg('[PGS-ERP] Logout clicked — calling /api/auth/logout');
-
-    try {
-      const resp = await fetchAuth('/api/auth/logout', { method: 'POST', headers: { 'Accept': 'application/json' }});
-      dbg('[PGS-ERP] /api/auth/logout status=', resp.status);
-      dbg('[PGS-ERP] /api/auth/logout headers=', [...resp.headers.entries()]);
-
-      const body = await safeJson(resp);
-      dbg('[PGS-ERP] /api/auth/logout body=', body);
-
-      if (resp.ok) {
-        dbg('[PGS-ERP] logout ok — redirecting to login');
-        // force remove cookie client-side by setting expired cookie for the session name
-        try { document.cookie = 'pgs_sid=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT'; } catch(e) {}
-        window.location.href = '/login.html';
-      } else {
-        dbg('[PGS-ERP] logout returned non-ok. showing message');
-        alert('Logout failed: ' + (body && body.error ? body.error : 'status ' + resp.status));
-      }
-    } catch (err) {
-      dbg('[PGS-ERP] Network error during logout:', err);
-      alert('Network error during logout — check debug overlay and server logs.');
-    }
-  });
-
-  dbg('[PGS-ERP] logout handler attached to', btn);
-}
-
-// ---------- Expose debug logout for manual test ----------
-window.pgsDebugLogout = async function() {
-  dbg('[PGS-ERP] pgsDebugLogout invoked');
-  try {
-    const resp = await fetchAuth('/api/auth/logout', { method: 'POST', headers: { 'Accept': 'application/json' }});
-    dbg('[PGS-ERP] debug logout status=', resp.status);
-    const body = await safeJson(resp);
-    dbg('[PGS-ERP] debug logout body=', body);
-  } catch (err) {
-    dbg('[PGS-ERP] debug logout error=', err);
-  }
-};
-
-// ---------- Export or attach any existing modules stubs to maintain compatibility ---------
-// If your other modules expect functions on window, keep them:
-// window.loadClients = ... etc. (not modified here)
-
-dbg('[PGS-ERP] app.js loaded (patched).');
-
-
-if (!location.pathname.endsWith('/login.html') && !location.pathname.endsWith('/login')) {
-  document.addEventListener('DOMContentLoaded', async () => {
-    let res;
-    try {
-      res = await fetchAuth('/api/auth/current-user', { method: 'GET', headers: { 'Accept': 'application/json' } });
-    } catch (err) {
-      console.error('Network/CORS error while fetching current-user:', err);
-      // Show a friendly error on screen instead of redirecting to avoid flashing
-      const content = document.getElementById('content');
-      if (content) content.innerHTML = '<p style="color:#b00">Network or CORS error contacting server. Check server logs.</p>';
-      return;
-    }
-
-    // If not OK, do not immediately redirect — show a friendly message or bring user to login manually.
-    if (!res.ok) {
-      console.warn('Not authenticated or server returned non-200 for current-user:', res.status);
-      // The server should return JSON 401. We simply show login button suggestion to the user.
-      const content = document.getElementById('content');
-      if (content) {
-        content.innerHTML = `<p>You are not logged in. <a href="/login.html">Go to login</a></p>`;
-      } else {
-        // fallback: navigate to login only if user explicitly clicks or uses link
-      }
-      return;
-    }
-
-    // content-type guard: ensure server returned JSON
-    const ct = res.headers.get('content-type') || '';
-    if (!ct.includes('application/json')) {
-      console.error('Expected JSON for current-user but got:', ct);
-      const content = document.getElementById('content');
-      if (content) content.innerHTML = '<p style="color:#b00">Server returned unexpected content for authentication. Check server-side API.</p>';
-      return;
-    }
-
-    user = await res.json();
-    if (!user || typeof user.role === 'undefined') {
-      console.error('User data is invalid or missing role:', user);
-      document.getElementById('content').innerHTML = `<p style="color:#b00">Invalid user data. <a href="/login.html">Login</a></p>`;
-      return;
-    }
-
   const content = document.getElementById('content');
   content.innerHTML = `<h2>Welcome, ${user.role}</h2>`;
 
@@ -318,7 +76,7 @@ if (!location.pathname.endsWith('/login.html') && !location.pathname.endsWith('/
 
   document.getElementById('logoutBtn').addEventListener('click', async () => {
     try {
-      await fetch('/api/auth/logout', { credentials: 'include' });
+      await fetchAuth('/api/auth/logout', { method: 'POST' });
     } catch (err) {
       console.error('Logout error:', err);
     }
@@ -344,7 +102,7 @@ window.showTable = async (table) => {
   else if (table === 'invoices') data = await loadInvoices();
   else if (table === 'salaries') data = await loadSalaries();
   else if (table === 'security_supervisors') {
-    const res = await fetch('/api/security-supervisors', { credentials: 'include' });
+    const res = await fetchAuth('/api/security-supervisors');
     data = res.ok ? await res.json() : [];
     if (!res.ok) console.error('Fetch error for supervisors:', await res.text());
   }
@@ -435,8 +193,9 @@ window.showSupervisorForm = async () => {
       alert(`Supervisor created successfully with ID: ${data.id}`);
       showTable('security_supervisors');
     } else {
-      const error = await response.json();
-      alert(`Failed to create supervisor: ${error.error || 'Unknown error'}`);
+      let errMsg = 'Unknown error';
+      try { errMsg = (await response.json()).error || errMsg; } catch(e){ errMsg = await response.text().catch(()=>errMsg); }
+      alert(`Failed to create supervisor: ${errMsg}`);
     }
     overlay.remove();
   });
@@ -447,8 +206,8 @@ window.showAttendanceFormForSupervisor = async () => {
 
   // Fetch lists (reuse shared loaders if available)
   const [employees, clients] = await Promise.all([
-    (typeof loadEmployees === 'function' ? loadEmployees() : fetch('/api/employees').then(r => r.json()).catch(() => [])),
-    (typeof loadClients === 'function' ? loadClients() : fetch('/api/clients').then(r => r.json()).catch(() => [])),
+    (typeof loadEmployees === 'function' ? loadEmployees() : fetchAuth('/api/employees').then(r => r.ok ? r.json() : [] ).catch(() => [])),
+    (typeof loadClients === 'function' ? loadClients() : fetchAuth('/api/clients').then(r => r.ok ? r.json() : [] ).catch(() => [])),
   ]);
 
   const employeesById = {};
@@ -696,8 +455,7 @@ window.renderTable = (containerId, table, data, searchTerm) => {
   tableDiv.innerHTML = html;
 };
 
-
-// === Add these helpers anywhere after renderTable ===
+// Keep existing approve/reject helpers (ensure credentials included)
 window.approveAttendance = async (id) => {
   try {
     const r = await fetchAuth(`/api/attendances/${id}/approve`, { method: 'POST' });
@@ -726,14 +484,14 @@ window.rejectAttendance = async (id) => {
 window.editAttendance = async (id) => {
   try {
     // Fetch the row (server-side truth)
-    const r = await fetchAuth(`/api/attendances/${id}`, { credentials: 'include' });
+    const r = await fetchAuth(`/api/attendances/${id}`);
     if (!r.ok) throw new Error(await r.text());
     const row = await r.json();
 
     // Fetch employees & clients for dropdowns
     const [employees, clients] = await Promise.all([
-      (typeof loadEmployees === 'function' ? loadEmployees() : fetch('/api/employees').then(x=>x.json())),
-      (typeof loadClients === 'function' ? loadClients() : fetch('/api/clients').then(x=>x.json())),
+      (typeof loadEmployees === 'function' ? loadEmployees() : fetchAuth('/api/employees').then(x=> x.ok ? x.json() : [])),
+      (typeof loadClients === 'function' ? loadClients() : fetchAuth('/api/clients').then(x=> x.ok ? x.json() : [])),
     ]);
 
     // Build modal
@@ -801,7 +559,6 @@ window.editAttendance = async (id) => {
         const u = await fetchAuth(`/api/attendances/${id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
           body: JSON.stringify(payload)
         });
         if (!u.ok) throw new Error(await u.text());
@@ -824,8 +581,7 @@ window.deleteAttendance = async (id) => {
   if (!confirm(`Delete attendance #${id}? This cannot be undone.`)) return;
   try {
     const r = await fetchAuth(`/api/attendances/${id}`, {
-      method: 'DELETE',
-      credentials: 'include'
+      method: 'DELETE'
     });
     if (!r.ok) throw new Error(await r.text());
     alert('Deleted');
@@ -833,31 +589,6 @@ window.deleteAttendance = async (id) => {
   } catch (e) {
     console.error('deleteAttendance error:', e);
     alert('Delete failed: ' + (e.message || 'Unknown error'));
-  }
-};
-
-// Keep existing approve/reject helpers (ensure credentials included)
-window.approveAttendance = async (id) => {
-  try {
-    const r = await fetchAuth(`/api/attendances/${id}/approve`, { method: 'POST', credentials: 'include' });
-    if (!r.ok) throw new Error(await r.text());
-    alert('Attendance verified');
-    if (window.showTable) window.showTable('attendances');
-  } catch (e) {
-    console.error('approveAttendance error:', e);
-    alert('Failed to approve: ' + (e.message || 'Unknown'));
-  }
-};
-
-window.rejectAttendance = async (id) => {
-  try {
-    const r = await fetchAuth(`/api/attendances/${id}/reject`, { method: 'POST', credentials: 'include' });
-    if (!r.ok) throw new Error(await r.text());
-    alert('Attendance rejected');
-    if (window.showTable) window.showTable('attendances');
-  } catch (e) {
-    console.error('rejectAttendance error:', e);
-    alert('Failed to reject: ' + (e.message || 'Unknown'));
   }
 };
 
@@ -999,14 +730,16 @@ window.editSupervisor = async (id, name, username, client_id, site_name) => {
     const name = document.getElementById(`editSupervisorName-${uniqueId}`).value;
     const client_id = document.getElementById(`editSupervisorClientId-${uniqueId}`).value;
     const site_name = document.getElementById(`editSupervisorSite-${uniqueId}`).value;
-    const response = await fetch(`/api/security-supervisors/edit/${id}`, {
+    const response = await fetchAuth(`/api/security-supervisors/edit/${id}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, client_id, site_name })
     });
     if (response.ok) {
       alert('Supervisor updated');
       showTable('security_supervisors');
     } else {
-      alert((await response.json()).error || 'Failed to update supervisor');
+      let msg = 'Failed to update supervisor';
+      try { msg = (await response.json()).error || msg; } catch(e){ msg = await response.text().catch(()=>msg); }
+      alert(msg);
     }
     overlay.remove();
   });
@@ -1019,7 +752,9 @@ window.deleteSupervisor = async (id) => {
       alert('Supervisor deleted');
       showTable('security_supervisors');
     } else {
-      alert((await response.json()).error || 'Failed to delete supervisor');
+      let err = 'Failed to delete supervisor';
+      try { err = (await response.json()).error || err; } catch(e){ err = await response.text().catch(()=>err); }
+      alert(err);
     }
   }
 };
@@ -1044,6 +779,7 @@ window.showChangePassword = () => {
 
   document.getElementById('cpwCancel').onclick=()=>overlay.remove();
   document.getElementById('cpwSubmit').onclick=async ()=>{
+
     const currentPassword=document.getElementById('cpwCurrent').value.trim();
     const newPassword=document.getElementById('cpwNew').value.trim();
     const confirm=document.getElementById('cpwConfirm').value.trim();
@@ -1051,13 +787,18 @@ window.showChangePassword = () => {
     if(!currentPassword||!newPassword){ msg.textContent='Fill all fields';return; }
     if(newPassword.length<8){ msg.textContent='New password must be at least 8 characters';return; }
     if(newPassword!==confirm){ msg.textContent='Passwords do not match';return; }
-    const r=await fetch('/api/auth/change-password',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({currentPassword,newPassword})
-    });
-    const d=await r.json();
-    if(r.ok){ msg.style.color='green'; msg.textContent='Password updated'; setTimeout(()=>overlay.remove(),1000); }
-    else msg.textContent=d.error||'Failed';
+    try {
+      const r=await fetchAuth('/api/auth/change-password',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({currentPassword,newPassword})
+      });
+      const d = await r.json().catch(()=> ({}));
+      if(r.ok){ msg.style.color='green'; msg.textContent='Password updated'; setTimeout(()=>overlay.remove(),1000); }
+      else msg.textContent=d.error||'Failed';
+    } catch (e) {
+      console.error('Change password error:', e);
+      msg.textContent = 'Failed to update password';
+    }
   };
 };
 
@@ -1079,19 +820,24 @@ window.resetSupervisorPassword = (id, username) => {
   document.body.appendChild(overlay);
 
   document.getElementById('rpwCancel').onclick=()=>overlay.remove();
-  document.getElementById('rpwSubmit').onclick=async ()=>{
+  document.getElementById('rpwSubmit').onclick=async ()=> {
     const newPw=document.getElementById('rpwNew').value.trim();
     const confirmPw=document.getElementById('rpwConfirm').value.trim();
     const msg=document.getElementById('rpwMsg');
     if(!newPw||newPw.length<8){ msg.textContent='Password must be at least 8 characters'; return; }
     if(newPw!==confirmPw){ msg.textContent='Passwords do not match'; return; }
-    const r=await fetch('/api/auth/admin/reset-password',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({userId:id,role:'security_supervisor',newPassword:newPw})
-    });
-    const d=await r.json();
-    if(r.ok){ msg.style.color='green'; msg.textContent='Password reset'; setTimeout(()=>overlay.remove(),1000); }
-    else msg.textContent=d.error||'Failed';
+    try {
+      const r=await fetchAuth('/api/auth/admin/reset-password',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({userId:id,role:'security_supervisor',newPassword:newPw})
+      });
+      const d = await r.json().catch(()=> ({}));
+      if(r.ok){ msg.style.color='green'; msg.textContent='Password reset'; setTimeout(()=>overlay.remove(),1000); }
+      else msg.textContent=d.error||'Failed';
+    } catch (e) {
+      console.error('Reset supervisor pw error:', e);
+      msg.textContent='Failed';
+    }
   };
 };
 
@@ -1512,7 +1258,7 @@ function showClientProfile(cli, invoicesAll) {
 
 async function safeGet(url) {
   try {
-    const r = await fetch(url, { credentials: 'include' });
+    const r = await fetchAuth(url);
      if (!r.ok) throw new Error(await r.text());
      return await r.json();
    } catch (e) {
@@ -1602,6 +1348,4 @@ function parseAsDateOrMonth(s) {
   }
   const t = Date.parse(s);
   return isNaN(t) ? null : new Date(t);
-}}
-
-
+}
