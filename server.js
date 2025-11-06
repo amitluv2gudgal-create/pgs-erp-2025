@@ -106,7 +106,6 @@ async function bootstrap() {
 
     // mount routers (one registration per route)
     app.use('/api/auth', authRoutes);
-    app.use('/api/clients', clientRoutes);
     app.use('/api/employees', employeeRoutes);
     app.use('/api/attendances', attendanceRoutes);
     app.use('/api/deductions', deductionRoutes);
