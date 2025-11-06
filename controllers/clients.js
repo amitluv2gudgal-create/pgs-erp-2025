@@ -22,12 +22,6 @@ async function loadCategoriesMap(clientIds = []) {
   return map;
 }
 
-/**
- * GET /api/clients
- * Returns { clients: [ ... ] }
- * Supports simple query params (optional): ?q=searchText&page=1&limit=100
- */
-// temporary debug version of listClients - replace original implementation
 export async function listClients(req, res) {
   try {
     const qRaw = (req.query && req.query.q) ? String(req.query.q).trim() : '';
@@ -64,14 +58,11 @@ export async function listClients(req, res) {
     baseSql += ` ORDER BY id DESC LIMIT ? OFFSET ?`;
     params.push(limit, offset);
 
-    // run query
     const clients = await query(baseSql, params);
 
-    // load categories only if we have client ids
     const clientIds = (Array.isArray(clients) && clients.length) ? clients.map(c => c.id) : [];
     let catsMap = {};
     if (clientIds.length) {
-      // reuse your existing helper or inline fetching
       const placeholders = clientIds.map(() => '?').join(',');
       const catRows = await query(`SELECT client_id, category FROM client_categories WHERE client_id IN (${placeholders}) ORDER BY id ASC`, clientIds);
       catsMap = {};
@@ -100,14 +91,11 @@ export async function listClients(req, res) {
 
     return res.json({ clients: normalized, page, limit });
   } catch (err) {
-    // log full error stack to server logs (Render dashboard -> Logs)
     console.error('[clients.list] Fatal error:', err && (err.stack || err));
-
-    // return helpful JSON to frontend for debugging (temporary)
-    const message = (err && err.message) ? err.message : String(err);
-    return res.status(500).json({ error: 'Failed to fetch clients', details: message, stack: (err && err.stack) ? String(err.stack).split('\n').slice(0,10).join('\n') : undefined });
+    return res.status(500).json({ error: 'Failed to fetch clients' });
   }
 }
+
 
 
 //export async function listClients(req, res) {
