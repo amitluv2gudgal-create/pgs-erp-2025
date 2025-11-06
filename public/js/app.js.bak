@@ -1243,8 +1243,8 @@ function showClientProfile(cli, invoicesAll) {
     <div style="padding:16px;">
       ${profileKeyVals([
         ['Name', cli.name],
-        ['Address (Billed)', (cli.address_line1 && String(cli.address_line1).trim()) ? cli.address_line1 : (cli.address || '')], ['Address (Shipped)', (cli.address_line2 && String(cli.address_line2).trim()) ? cli.address_line2 : ''],
-        ['Contact Person', (cli.contact_person && String(cli.contact_person).trim()) ? cli.contact_person : (cli.contact || '')],
+        ['Address', cli.address],
+        ['Contact Person', cli.contact],
         ['Telephone', cli.telephone],
         ['Email', cli.email],
         ['CGST (%)', cli.cgst],

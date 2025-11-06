@@ -9,19 +9,7 @@ import { query, run } from '../db.js';
  * Helper: load categories for a list of client ids
  * returns { <clientId>: [category, ...], ... }
  */
-async function loadCategoriesMap(clientIds = []) {
-  if (!clientIds || clientIds.length === 0) return {};
-  // build placeholders
-  const placeholders = clientIds.map(() => '?').join(',');
-  const sql = `SELECT client_id, category, monthly_rate FROM client_categories WHERE client_id IN (${placeholders}) ORDER BY id ASC`;
-  const rows = await query(sql, clientIds);
-  const map = {};
-  for (const r of rows) {
-    (map[r.client_id] ||= []).push(r.category);
-  }
-  return map;
-}
-
+// TEMPORARY debug version — prints stack to server logs and returns details in JSON (remove after debugging)
 export async function listClients(req, res) {
   try {
     const qRaw = (req.query && req.query.q) ? String(req.query.q).trim() : '';
@@ -58,14 +46,15 @@ export async function listClients(req, res) {
     baseSql += ` ORDER BY id DESC LIMIT ? OFFSET ?`;
     params.push(limit, offset);
 
+    // run the main query
     const clients = await query(baseSql, params);
 
+    // build categories map only if clients exist
     const clientIds = (Array.isArray(clients) && clients.length) ? clients.map(c => c.id) : [];
-    let catsMap = {};
+    const catsMap = {};
     if (clientIds.length) {
       const placeholders = clientIds.map(() => '?').join(',');
       const catRows = await query(`SELECT client_id, category FROM client_categories WHERE client_id IN (${placeholders}) ORDER BY id ASC`, clientIds);
-      catsMap = {};
       for (const r of (catRows || [])) {
         (catsMap[r.client_id] ||= []).push(r.category);
       }
@@ -91,12 +80,15 @@ export async function listClients(req, res) {
 
     return res.json({ clients: normalized, page, limit });
   } catch (err) {
-    console.error('[clients.list] Fatal error:', err && (err.stack || err));
-    return res.status(500).json({ error: 'Failed to fetch clients' });
+    // log full error (server logs)
+    console.error('[clients.list] FATAL:', err && (err.stack || err));
+
+    // TEMP: return error details in JSON to aid debugging (remove this after fix)
+    const details = (err && err.message) ? err.message : String(err);
+    const shortStack = (err && err.stack) ? String(err.stack).split('\n').slice(0,8).join('\n') : undefined;
+    return res.status(500).json({ error: 'Failed to fetch clients', details, stack: shortStack });
   }
 }
-
-
 
 //export async function listClients(req, res) {
   //try {
