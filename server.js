@@ -17,8 +17,6 @@ import {
   DB_PATH
 } from './db.js';
 
-(alias); dbModule
-
 const router = express.Router();
 
 router.get('/api/clients', clientsCtrl.listClients);
