@@ -167,3 +167,40 @@ ul {
   display: block;
 }
 
+/* Clients table: allow horizontal scrolling and wider columns */
+.responsive-table {
+  width: 100%;
+  overflow-x: auto;       /* allow horizontal scroll when table is wide */
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 6px;
+}
+
+/* make actual table able to grow beyond container */
+.clients-table {
+  min-width: 1600px;      /* increase as needed (make larger if you have many columns) */
+  table-layout: auto;     /* allow natural widths so headers don't truncate */
+}
+
+/* optionally increase individual column min widths for clarity */
+.clients-table th:nth-child(1)  { min-width: 60px;  } /* id */
+.clients-table th:nth-child(2)  { min-width: 220px; } /* name */
+.clients-table th:nth-child(3)  { min-width: 300px; } /* address */
+.clients-table th:nth-child(4)  { min-width: 180px; } /* contact */
+.clients-table th:nth-child(5)  { min-width: 120px; } /* telephone */
+.clients-table th:nth-child(6)  { min-width: 220px; } /* email */
+.clients-table th:nth-child(11) { min-width: 220px; } /* address_line1 */
+.clients-table th:nth-child(12) { min-width: 300px; } /* address_line2 */
+
+/* make table headers stick (optional) */
+.clients-table thead th {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 2;
+}
+
+/* tweak action buttons */
+.clients-table td .btn-edit-client,
+.clients-table td .btn-delete-client {
+  margin-right: 6px;
+}
