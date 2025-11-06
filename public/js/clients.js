@@ -4,9 +4,37 @@
 // Keeps loadClients export for other modules.
 
 export const loadClients = async () => {
-  const res = await fetch('/api/clients');
-  return await res.json();
+  const container = document.querySelector('#table-container') || document.getElementById('clients-table-container') || document.getElementById('content');
+  if (container) {
+    container.innerHTML = `<div style="padding:16px">Loading clients…</div>`;
+  }
+
+  try {
+    const resp = await fetch('/api/clients', { credentials: 'include' });
+    if (!resp.ok) {
+      const text = await resp.text();
+      console.error(`[loadClients] ${resp.status} ${resp.statusText}`, text.slice(0, 200));
+      if (container) container.innerHTML = `<div style="color:#a00">Server Error ${resp.status}: ${escapeHtml(text.slice(0,500))}</div>`;
+      return [];
+    }
+
+    const ct = resp.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      const text = await resp.text();
+      console.error(`[loadClients] Non-JSON content-type: ${ct}`, text.slice(0,200));
+      if (container) container.innerHTML = `<div style="color:#a00">Unexpected server content-type: ${escapeHtml(ct)}</div>`;
+      return [];
+    }
+
+    const json = await resp.json();
+    return Array.isArray(json) ? json : (json.clients || []);
+  } catch (err) {
+    console.error('[loadClients] Fetch failed', err);
+    if (container) container.innerHTML = `<div style="color:#a00">Network or JS error: ${escapeHtml(String(err))}</div>`;
+    return [];
+  }
 };
+
 
 // small helper to escape HTML when injecting values into inputs
 const escHtml = (s) => {
