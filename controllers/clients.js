@@ -27,9 +27,9 @@ async function loadCategoriesMap(clientIds = []) {
  * Returns { clients: [ ... ] }
  * Supports simple query params (optional): ?q=searchText&page=1&limit=100
  */
+// temporary debug version of listClients - replace original implementation
 export async function listClients(req, res) {
   try {
-    // Basic server-side search + paging (non-strict/simple)
     const qRaw = (req.query && req.query.q) ? String(req.query.q).trim() : '';
     const page = Math.max(1, parseInt(req.query?.page || '1', 10));
     const limit = Math.min(2000, Math.max(10, parseInt(req.query?.limit || '1000', 10)));
@@ -56,7 +56,6 @@ export async function listClients(req, res) {
 
     const params = [];
     if (qRaw) {
-      // simple search across name, gst_number, address_line1/2, contact_person
       baseSql += ` WHERE (LOWER(name) LIKE ? OR LOWER(gst_number) LIKE ? OR LOWER(address_line1) LIKE ? OR LOWER(address_line2) LIKE ? OR LOWER(contact_person) LIKE ?)`;
       const qLike = `%${qRaw.toLowerCase()}%`;
       params.push(qLike, qLike, qLike, qLike, qLike);
@@ -65,14 +64,23 @@ export async function listClients(req, res) {
     baseSql += ` ORDER BY id DESC LIMIT ? OFFSET ?`;
     params.push(limit, offset);
 
+    // run query
     const clients = await query(baseSql, params);
 
-    // load categories map
-    const clientIds = clients.map(c => c.id);
-    const catsMap = await loadCategoriesMap(clientIds);
+    // load categories only if we have client ids
+    const clientIds = (Array.isArray(clients) && clients.length) ? clients.map(c => c.id) : [];
+    let catsMap = {};
+    if (clientIds.length) {
+      // reuse your existing helper or inline fetching
+      const placeholders = clientIds.map(() => '?').join(',');
+      const catRows = await query(`SELECT client_id, category FROM client_categories WHERE client_id IN (${placeholders}) ORDER BY id ASC`, clientIds);
+      catsMap = {};
+      for (const r of (catRows || [])) {
+        (catsMap[r.client_id] ||= []).push(r.category);
+      }
+    }
 
-    // normalize
-    const normalized = clients.map(c => ({
+    const normalized = (clients || []).map(c => ({
       id: c.id,
       name: c.name ?? '',
       address_line1: c.address_line1 ?? '',
@@ -92,10 +100,85 @@ export async function listClients(req, res) {
 
     return res.json({ clients: normalized, page, limit });
   } catch (err) {
-    console.error('[clients.list] error', err && err.message ? err.message : err);
-    return res.status(500).json({ error: 'Failed to fetch clients' });
+    // log full error stack to server logs (Render dashboard -> Logs)
+    console.error('[clients.list] Fatal error:', err && (err.stack || err));
+
+    // return helpful JSON to frontend for debugging (temporary)
+    const message = (err && err.message) ? err.message : String(err);
+    return res.status(500).json({ error: 'Failed to fetch clients', details: message, stack: (err && err.stack) ? String(err.stack).split('\n').slice(0,10).join('\n') : undefined });
   }
 }
+
+
+//export async function listClients(req, res) {
+  //try {
+    // Basic server-side search + paging (non-strict/simple)
+    //const qRaw = (req.query && req.query.q) ? String(req.query.q).trim() : '';
+    //const page = Math.max(1, parseInt(req.query?.page || '1', 10));
+    //const limit = Math.min(2000, Math.max(10, parseInt(req.query?.limit || '1000', 10)));
+    //const offset = (page - 1) * limit;
+
+    //let baseSql = `
+    //SELECT
+        //id,
+        //name,
+        //address_line1,
+        //address_line2,
+        //po_dated,
+        //state,
+        //district,
+        //contact_person,
+        //telephone,
+        //email,
+//         gst_number,
+//         cgst,
+//         sgst,
+//         igst
+//       FROM clients
+//     `;
+
+//     const params = [];
+//     if (qRaw) {
+//       // simple search across name, gst_number, address_line1/2, contact_person
+//       baseSql += ` WHERE (LOWER(name) LIKE ? OR LOWER(gst_number) LIKE ? OR LOWER(address_line1) LIKE ? OR LOWER(address_line2) LIKE ? OR LOWER(contact_person) LIKE ?)`;
+//       const qLike = `%${qRaw.toLowerCase()}%`;
+//       params.push(qLike, qLike, qLike, qLike, qLike);
+//     }
+
+//     baseSql += ` ORDER BY id DESC LIMIT ? OFFSET ?`;
+//     params.push(limit, offset);
+
+//     const clients = await query(baseSql, params);
+
+//     // load categories map
+//     const clientIds = clients.map(c => c.id);
+//     const catsMap = await loadCategoriesMap(clientIds);
+
+//     // normalize
+//     const normalized = clients.map(c => ({
+//       id: c.id,
+//       name: c.name ?? '',
+//       address_line1: c.address_line1 ?? '',
+//       address_line2: c.address_line2 ?? '',
+//       po_dated: c.po_dated ?? '',
+//       state: c.state ?? '',
+//       district: c.district ?? '',
+//       contact_person: c.contact_person ?? '',
+//       telephone: c.telephone ?? '',
+//       email: c.email ?? '',
+//       gst_number: c.gst_number ?? '',
+//       cgst: c.cgst ?? 0,
+//       sgst: c.sgst ?? 0,
+//       igst: c.igst ?? 0,
+//       categories: catsMap[c.id] ?? []
+//     }));
+
+//     return res.json({ clients: normalized, page, limit });
+//   } catch (err) {
+//     console.error('[clients.list] error', err && err.message ? err.message : err);
+//     return res.status(500).json({ error: 'Failed to fetch clients' });
+//   }
+// }
 
 /**
  * GET /api/clients/:id
