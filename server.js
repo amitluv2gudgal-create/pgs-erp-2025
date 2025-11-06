@@ -17,18 +17,8 @@ import {
   DB_PATH
 } from './db.js';
 
+
 const router = express.Router();
-
-router.get('/api/clients', clientsCtrl.listClients);
-router.get('/api/clients/:id', clientsCtrl.getClient);
-router.post('/api/clients', clientsCtrl.createClient);
-router.put('/api/clients/:id', clientsCtrl.updateClient);
-router.delete('/api/clients/:id', clientsCtrl.deleteClient);
-
-router.get('/api/clients/:id/categories', clientsCtrl.listClientCategories);
-router.post('/api/clients/:id/categories', clientsCtrl.addClientCategory);
-router.delete('/api/clients/:id/categories/:catId', clientsCtrl.removeClientCategory);
-
 
 // Routers
 import authRoutes from './controllers/auth.js';
@@ -113,6 +103,18 @@ async function bootstrap() {
     app.use('/api/salaries', salaryRoutes);
     app.use('/api/requests', requestRoutes);
     app.use('/api/security-supervisors', securitySupervisorRoutes);
+
+// mount clients routes directly (placed after other app.use('/api/...') lines)
+app.get('/api/clients', clientsCtrl.listClients);
+app.get('/api/clients/:id', clientsCtrl.getClient);
+app.post('/api/clients', clientsCtrl.createClient);
+app.put('/api/clients/:id', clientsCtrl.updateClient);
+app.delete('/api/clients/:id', clientsCtrl.deleteClient);
+
+app.get('/api/clients/:id/categories', clientsCtrl.listClientCategories);
+app.post('/api/clients/:id/categories', clientsCtrl.addClientCategory);
+app.delete('/api/clients/:id/categories/:catId', clientsCtrl.removeClientCategory);
+
 
     // Basic pages
     app.get('/', (req, res) => res.redirect('/login.html'));
