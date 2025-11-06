@@ -6,6 +6,7 @@ import SQLiteStoreFactory from 'connect-sqlite3';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
 
+
 // DB helpers and migrations (as you had)
 import {
   dropLegacyClientAddressColumn,
@@ -16,9 +17,24 @@ import {
   DB_PATH
 } from './db.js';
 
+(alias); dbModule
+
+const router = express.Router();
+
+router.get('/api/clients', clientsCtrl.listClients);
+router.get('/api/clients/:id', clientsCtrl.getClient);
+router.post('/api/clients', clientsCtrl.createClient);
+router.put('/api/clients/:id', clientsCtrl.updateClient);
+router.delete('/api/clients/:id', clientsCtrl.deleteClient);
+
+router.get('/api/clients/:id/categories', clientsCtrl.listClientCategories);
+router.post('/api/clients/:id/categories', clientsCtrl.addClientCategory);
+router.delete('/api/clients/:id/categories/:catId', clientsCtrl.removeClientCategory);
+
+
 // Routers
 import authRoutes from './controllers/auth.js';
-import clientRoutes from './controllers/clients.js';
+import clientsCtrl from './controllers/clients.js';
 import employeeRoutes from './controllers/employees.js';
 import attendanceRoutes from './controllers/attendances.js';
 import deductionRoutes from './controllers/deductions.js'; // single import for deductions
