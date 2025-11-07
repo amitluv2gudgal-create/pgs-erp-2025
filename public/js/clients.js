@@ -643,15 +643,15 @@ function addCategoryFieldModal(){
 
 /* ======= Normalizing renderer for Clients table (replace existing renderClientsTable + escapeHtml) ======= */
 
-function escapeHtml(s){
-  if (s === null || s === undefined) return '';
-  return String(s)
-    .replaceAll('&','&amp;')
-    .replaceAll('<','&lt;')
-    .replaceAll('>','&gt;')
-    .replaceAll('"','&quot;')
-    .replaceAll("'",'&#39;');
-}
+// function escapeHtml(s){
+//   if (s === null || s === undefined) return '';
+//   return String(s)
+//     .replaceAll('&','&amp;')
+//     .replaceAll('<','&lt;')
+//     .replaceAll('>','&gt;')
+//     .replaceAll('"','&quot;')
+//     .replaceAll("'",'&#39;');
+// }
 
 /**
  * Normalize a client object from whatever shape the backend returns
