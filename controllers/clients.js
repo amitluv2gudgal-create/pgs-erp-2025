@@ -10,6 +10,8 @@ import { query, run } from '../db.js';
  * returns { <clientId>: [category, ...], ... }
  */
 // TEMPORARY debug version — prints stack to server logs and returns details in JSON (remove after debugging)
+// controllers/clients.js
+
 export async function listClients(req, res) {
   try {
     const qRaw = (req.query && req.query.q) ? String(req.query.q).trim() : '';
@@ -46,15 +48,15 @@ export async function listClients(req, res) {
     baseSql += ` ORDER BY id DESC LIMIT ? OFFSET ?`;
     params.push(limit, offset);
 
-    // run the main query
     const clients = await query(baseSql, params);
 
-    // build categories map only if clients exist
-    const clientIds = (Array.isArray(clients) && clients.length) ? clients.map(c => c.id) : [];
-    const catsMap = {};
+    // build categories map if there are any clients
+    const clientIds = Array.isArray(clients) && clients.length ? clients.map(c => c.id) : [];
+    let catsMap = {};
     if (clientIds.length) {
       const placeholders = clientIds.map(() => '?').join(',');
       const catRows = await query(`SELECT client_id, category FROM client_categories WHERE client_id IN (${placeholders}) ORDER BY id ASC`, clientIds);
+      catsMap = {};
       for (const r of (catRows || [])) {
         (catsMap[r.client_id] ||= []).push(r.category);
       }
@@ -80,18 +82,14 @@ export async function listClients(req, res) {
 
     return res.json({ clients: normalized, page, limit });
   } catch (err) {
-    // log full error (server logs)
-    console.error('[clients.list] FATAL:', err && (err.stack || err));
+    // Log full error to server logs (useful for debugging; not returned to client)
+    console.error('[clients.list] Fatal error:', err && (err.stack || err));
 
-    // TEMP: return error details in JSON to aid debugging (remove this after fix)
-    const details = (err && err.message) ? err.message : String(err);
-    const shortStack = (err && err.stack) ? String(err.stack).split('\n').slice(0,8).join('\n') : undefined;
-    return res.status(500).json({ error: 'Failed to fetch clients', details, stack: shortStack });
+    // Return a safe, generic error message to the client
+    return res.status(500).json({ error: 'Failed to fetch clients' });
   }
 }
 
-//export async function listClients(req, res) {
-  //try {
     // Basic server-side search + paging (non-strict/simple)
     //const qRaw = (req.query && req.query.q) ? String(req.query.q).trim() : '';
     //const page = Math.max(1, parseInt(req.query?.page || '1', 10));
