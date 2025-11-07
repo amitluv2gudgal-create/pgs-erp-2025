@@ -61,112 +61,112 @@ export async function loadClients() {
 }
 
 // ------------------ renderer ------------------
-window.renderClientsTable = async function(clients) {
-  const container = document.querySelector('#table-container') || document.getElementById('clients-table-container') || document.getElementById('content');
-  if (!container) return console.warn('No clients table container found');
+// window.renderClientsTable = async function(clients) {
+//   const container = document.querySelector('#table-container') || document.getElementById('clients-table-container') || document.getElementById('content');
+//   if (!container) return console.warn('No clients table container found');
 
-  const esc = s => (s == null ? '' : escapeHtml(s));
+//   const esc = s => (s == null ? '' : escapeHtml(s));
 
-  // show interim message
-  container.innerHTML = `<div style="padding:10px">Building clients table…</div>`;
+//   // show interim message
+//   container.innerHTML = `<div style="padding:10px">Building clients table…</div>`;
 
-  if (!Array.isArray(clients)) {
-    clients = await (typeof loadClients === 'function' ? loadClients() : Promise.resolve([]));
-  }
+//   if (!Array.isArray(clients)) {
+//     clients = await (typeof loadClients === 'function' ? loadClients() : Promise.resolve([]));
+//   }
 
-  const cols = [
-    { key: 'id', label: 'ID' },
-    { key: 'name', label: 'Name' },
-    { key: 'address_line1', label: 'Address Line 1 (Billed)' },
-    { key: 'address_line2', label: 'Address Line 2 (Shipped)' },
-    { key: 'po_dated', label: 'PO/Dated' },
-    { key: 'state', label: 'State' },
-    { key: 'district', label: 'District' },
-    { key: 'contact_person', label: 'Contact Person' },
-    { key: 'telephone', label: 'Telephone' },
-    { key: 'email', label: 'Email' },
-    { key: 'gst_number', label: 'GST Number' },
-    { key: 'cgst', label: 'CGST (%)' },
-    { key: 'sgst', label: 'SGST (%)' },
-    { key: 'igst', label: 'IGST (%)' },
-    { key: 'categories', label: 'Categories' }
-  ];
+//   const cols = [
+//     { key: 'id', label: 'ID' },
+//     { key: 'name', label: 'Name' },
+//     { key: 'address_line1', label: 'Address Line 1 (Billed)' },
+//     { key: 'address_line2', label: 'Address Line 2 (Shipped)' },
+//     { key: 'po_dated', label: 'PO/Dated' },
+//     { key: 'state', label: 'State' },
+//     { key: 'district', label: 'District' },
+//     { key: 'contact_person', label: 'Contact Person' },
+//     { key: 'telephone', label: 'Telephone' },
+//     { key: 'email', label: 'Email' },
+//     { key: 'gst_number', label: 'GST Number' },
+//     { key: 'cgst', label: 'CGST (%)' },
+//     { key: 'sgst', label: 'SGST (%)' },
+//     { key: 'igst', label: 'IGST (%)' },
+//     { key: 'categories', label: 'Categories' }
+//   ];
 
-  let html = `<div style="overflow:auto;"><table id="clients-table" style="width:100%;border-collapse:collapse"><thead><tr>`;
-  html += cols.map(c => `<th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">${esc(c.label)}</th>`).join('');
-  html += `<th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">Actions</th></tr></thead><tbody>`;
+//   let html = `<div style="overflow:auto;"><table id="clients-table" style="width:100%;border-collapse:collapse"><thead><tr>`;
+//   html += cols.map(c => `<th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">${esc(c.label)}</th>`).join('');
+//   html += `<th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">Actions</th></tr></thead><tbody>`;
 
-  if (!clients || clients.length === 0) {
-    html += `<tr><td colspan="${cols.length+1}" style="padding:16px">No clients found.</td></tr>`;
-  } else {
-    for (const c of clients) {
-      const addr1 = (c.address_line1 && String(c.address_line1).trim()) ? c.address_line1 : (c.address || '');
-      const addr2 = (c.address_line2 && String(c.address_line2).trim()) ? c.address_line2 : '';
-      const contact = (c.contact_person && String(c.contact_person).trim()) ? c.contact_person : (c.contact || '');
-      const telephone = c.telephone || '';
-      const cats = Array.isArray(c.categories) ? c.categories.join(', ') : (c.categories || '');
+//   if (!clients || clients.length === 0) {
+//     html += `<tr><td colspan="${cols.length+1}" style="padding:16px">No clients found.</td></tr>`;
+//   } else {
+//     for (const c of clients) {
+//       const addr1 = (c.address_line1 && String(c.address_line1).trim()) ? c.address_line1 : (c.address || '');
+//       const addr2 = (c.address_line2 && String(c.address_line2).trim()) ? c.address_line2 : '';
+//       const contact = (c.contact_person && String(c.contact_person).trim()) ? c.contact_person : (c.contact || '');
+//       const telephone = c.telephone || '';
+//       const cats = Array.isArray(c.categories) ? c.categories.join(', ') : (c.categories || '');
 
-      html += `<tr data-client-id="${esc(c.id)}">`;
-      html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.id)}</td>`;
-      html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.name)}</td>`;
-      html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(addr1)}</td>`;
-      html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(addr2)}</td>`;
-      html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.po_dated || '')}</td>`;
-      html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.state || '')}</td>`;
-      html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.district || '')}</td>`;
-      html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(contact)}</td>`;
-      html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(telephone)}</td>`;
-      html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.email || '')}</td>`;
-      html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.gst_number || '')}</td>`;
-      html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.cgst ?? '')}</td>`;
-      html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.sgst ?? '')}</td>`;
-      html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.igst ?? '')}</td>`;
-      html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(cats)}</td>`;
-      html += `<td style="padding:8px;border-bottom:1px solid #eee;">`;
-      html += `<button class="btn-action btn-edit" data-action="edit" data-id="${esc(c.id)}" style="margin-right:8px">Edit</button>`;
-      html += `<button class="btn-action btn-delete" data-action="delete" data-id="${esc(c.id)}">Delete</button>`;
-      html += `</td></tr>`;
-    }
-  }
+//       html += `<tr data-client-id="${esc(c.id)}">`;
+//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.id)}</td>`;
+//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.name)}</td>`;
+//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(addr1)}</td>`;
+//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(addr2)}</td>`;
+//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.po_dated || '')}</td>`;
+//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.state || '')}</td>`;
+//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.district || '')}</td>`;
+//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(contact)}</td>`;
+//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(telephone)}</td>`;
+//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.email || '')}</td>`;
+//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.gst_number || '')}</td>`;
+//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.cgst ?? '')}</td>`;
+//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.sgst ?? '')}</td>`;
+//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.igst ?? '')}</td>`;
+//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(cats)}</td>`;
+//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">`;
+//       html += `<button class="btn-action btn-edit" data-action="edit" data-id="${esc(c.id)}" style="margin-right:8px">Edit</button>`;
+//       html += `<button class="btn-action btn-delete" data-action="delete" data-id="${esc(c.id)}">Delete</button>`;
+//       html += `</td></tr>`;
+//     }
+//   }
 
-  html += `</tbody></table></div>`;
-  container.innerHTML = html;
+//   html += `</tbody></table></div>`;
+//   container.innerHTML = html;
 
-  if (!window.__clients_action_handler_attached) {
-    window.__clients_action_handler_attached = true;
-    container.addEventListener('click', async function(ev) {
-      const btn = ev.target.closest('.btn-action');
-      if (!btn) return;
-      const action = btn.getAttribute('data-action');
-      const id = btn.getAttribute('data-id');
-      if (!action || !id) return;
+//   if (!window.__clients_action_handler_attached) {
+//     window.__clients_action_handler_attached = true;
+//     container.addEventListener('click', async function(ev) {
+//       const btn = ev.target.closest('.btn-action');
+//       if (!btn) return;
+//       const action = btn.getAttribute('data-action');
+//       const id = btn.getAttribute('data-id');
+//       if (!action || !id) return;
 
-      if (action === 'edit') {
-        if (typeof window.onEditClient === 'function') {
-          window.onEditClient(Number(id));
-        } else {
-          window.location.href = `/client-edit.html?id=${encodeURIComponent(id)}`;
-        }
-      } else if (action === 'delete') {
-        if (!confirm('Delete client ID ' + id + '?')) return;
-        try {
-          const resp = await fetch(`/api/clients/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'include' });
-          if (!resp.ok) {
-            const text = await resp.text().catch(()=>null);
-            alert('Delete failed: ' + (text || resp.status));
-            return;
-          }
-          await window.renderClientsTable();
-        } catch (err) {
-          console.error('Delete client error', err);
-          alert('Network error while deleting client.');
-        }
-      }
-    }, false);
-  }
+//       if (action === 'edit') {
+//         if (typeof window.onEditClient === 'function') {
+//           window.onEditClient(Number(id));
+//         } else {
+//           window.location.href = `/client-edit.html?id=${encodeURIComponent(id)}`;
+//         }
+//       } else if (action === 'delete') {
+//         if (!confirm('Delete client ID ' + id + '?')) return;
+//         try {
+//           const resp = await fetch(`/api/clients/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'include' });
+//           if (!resp.ok) {
+//             const text = await resp.text().catch(()=>null);
+//             alert('Delete failed: ' + (text || resp.status));
+//             return;
+//           }
+//           await window.renderClientsTable();
+//         } catch (err) {
+//           console.error('Delete client error', err);
+//           alert('Network error while deleting client.');
+//         }
+//       }
+//     }, false);
+//   }
 
-  return clients;
-};
+//   return clients;
+// };
 
 // ---------- CREATE CLIENT (uses clEditForm as requested) ----------
 window.showClientForm = () => {
