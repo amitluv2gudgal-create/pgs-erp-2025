@@ -50,7 +50,7 @@ export async function listClients(req, res) {
 
     const clients = await query(baseSql, params);
 
-    // build categories map if there are any clients
+    // categories map
     const clientIds = Array.isArray(clients) && clients.length ? clients.map(c => c.id) : [];
     let catsMap = {};
     if (clientIds.length) {
@@ -82,13 +82,11 @@ export async function listClients(req, res) {
 
     return res.json({ clients: normalized, page, limit });
   } catch (err) {
-    // Log full error to server logs (useful for debugging; not returned to client)
     console.error('[clients.list] Fatal error:', err && (err.stack || err));
-
-    // Return a safe, generic error message to the client
     return res.status(500).json({ error: 'Failed to fetch clients' });
   }
 }
+
 
     // Basic server-side search + paging (non-strict/simple)
     //const qRaw = (req.query && req.query.q) ? String(req.query.q).trim() : '';
