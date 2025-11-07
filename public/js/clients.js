@@ -1,9 +1,15 @@
-// public/js/clients.js
-// Updated to use the new Create Client form (id="clEditForm"),
-// matching table fields and category form (id="catForm").
-// Keeps loadClients export for other modules.
+// ------------------ helper ------------------
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'", '&#039;');
+}
 
-// resilient loader — replace existing loadClients in public/js/clients.js
+// ------------------ loader ------------------
 export async function loadClients() {
   const container = document.querySelector('#table-container') || document.getElementById('clients-table-container') || document.getElementById('content');
   if (container) container.innerHTML = `<div class="loading">Loading clients…</div>`;
@@ -11,7 +17,6 @@ export async function loadClients() {
   try {
     const resp = await fetch('/api/clients', { credentials: 'include' });
 
-    // unauthorized: show friendly message and stop
     if (resp.status === 401) {
       if (container) container.innerHTML = `
         <div style="padding:16px;color:#a00">
@@ -23,15 +28,13 @@ export async function loadClients() {
 
     const contentType = (resp.headers.get('content-type') || '').toLowerCase();
 
-    // non-OK status but JSON -> show server message
     if (!resp.ok && contentType.includes('application/json')) {
       const json = await resp.json().catch(()=>({}));
-      if (container) container.innerHTML = `<div style="padding:16px;color:#a00">Server error ${resp.status}: ${json.error || JSON.stringify(json)}</div>`;
+      if (container) container.innerHTML = `<div style="padding:16px;color:#a00">Server error ${resp.status}: ${escapeHtml(json.error || JSON.stringify(json))}</div>`;
       console.error('[loadClients] server error', resp.status, json);
       return [];
     }
 
-    // If the response is not JSON (e.g., HTML login page), do NOT inject it
     if (!contentType.includes('application/json')) {
       const body = await resp.text().catch(()=>'(no body)');
       if (container) container.innerHTML = `<div style="padding:16px;color:#a00">
@@ -42,10 +45,8 @@ export async function loadClients() {
       return [];
     }
 
-    // OK - parse JSON
     const payload = await resp.json();
     const clients = Array.isArray(payload) ? payload : (payload && payload.clients ? payload.clients : []);
-    // render via global renderer if present
     if (typeof window.renderClientsTable === 'function') {
       window.renderClientsTable(clients);
     } else {
@@ -59,18 +60,14 @@ export async function loadClients() {
   }
 }
 
-function escapeHtml(s) {
-  if (s == null) return '';
-  return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'", '&#039;');
-}
-
-// drop-in renderer: window.renderClientsTable(clientsArray)
+// ------------------ renderer ------------------
 window.renderClientsTable = async function(clients) {
   const container = document.querySelector('#table-container') || document.getElementById('clients-table-container') || document.getElementById('content');
   if (!container) return console.warn('No clients table container found');
 
-  const esc = s => (s == null ? '' : String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'));
+  const esc = s => (s == null ? '' : escapeHtml(s));
 
+  // show interim message
   container.innerHTML = `<div style="padding:10px">Building clients table…</div>`;
 
   if (!Array.isArray(clients)) {
@@ -125,17 +122,14 @@ window.renderClientsTable = async function(clients) {
       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.sgst ?? '')}</td>`;
       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.igst ?? '')}</td>`;
       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(cats)}</td>`;
-
       html += `<td style="padding:8px;border-bottom:1px solid #eee;">`;
       html += `<button class="btn-action btn-edit" data-action="edit" data-id="${esc(c.id)}" style="margin-right:8px">Edit</button>`;
       html += `<button class="btn-action btn-delete" data-action="delete" data-id="${esc(c.id)}">Delete</button>`;
-      html += `</td>`;
-
-      html += `</tr>`;
+      html += `</td></tr>`;
     }
   }
-  html += `</tbody></table></div>`;
 
+  html += `</tbody></table></div>`;
   container.innerHTML = html;
 
   if (!window.__clients_action_handler_attached) {
@@ -156,16 +150,13 @@ window.renderClientsTable = async function(clients) {
       } else if (action === 'delete') {
         if (!confirm('Delete client ID ' + id + '?')) return;
         try {
-          const resp = await fetch(`/api/clients/${encodeURIComponent(id)}`, {
-            method: 'DELETE',
-            credentials: 'include'
-          });
+          const resp = await fetch(`/api/clients/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'include' });
           if (!resp.ok) {
             const text = await resp.text().catch(()=>null);
             alert('Delete failed: ' + (text || resp.status));
             return;
           }
-          await renderClientsTable();
+          await window.renderClientsTable();
         } catch (err) {
           console.error('Delete client error', err);
           alert('Network error while deleting client.');
@@ -173,9 +164,9 @@ window.renderClientsTable = async function(clients) {
       }
     }, false);
   }
+
   return clients;
 };
-
 
 // ---------- CREATE CLIENT (uses clEditForm as requested) ----------
 window.showClientForm = () => {
@@ -641,22 +632,6 @@ function addCategoryFieldModal(){
   wrapper.querySelector('.removeCatBtn_modal').onclick = ()=>wrapper.remove();
 }
 
-/* ======= Normalizing renderer for Clients table (replace existing renderClientsTable + escapeHtml) ======= */
-
-// function escapeHtml(s){
-//   if (s === null || s === undefined) return '';
-//   return String(s)
-//     .replaceAll('&','&amp;')
-//     .replaceAll('<','&lt;')
-//     .replaceAll('>','&gt;')
-//     .replaceAll('"','&quot;')
-//     .replaceAll("'",'&#39;');
-// }
-
-/**
- * Normalize a client object from whatever shape the backend returns
- * into the fields used by the table renderer.
- */
 function normalizeClient(c = {}) {
   // copy shallow to avoid mutations
   const o = Object.assign({}, c);
@@ -695,289 +670,3 @@ function normalizeClient(c = {}) {
 
   return o;
 }
-
-// // ====================== Clients table renderer ======================
-// // Call: window.renderClientsTable(clientsArray)
-// // If called with no arg, it will call loadClients() and render result.
-// window.renderClientsTable = async function(clients) {
-//   const container = document.querySelector('#table-container') || document.getElementById('clients-table-container') || document.getElementById('content');
-//   if (!container) return console.warn('No clients table container found');
-
-//   // helper html esc
-//   const esc = s => (s == null ? '' : String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'));
-
-//   // show skeleton while building
-//   container.innerHTML = `<div style="padding:10px">Building clients table…</div>`;
-
-//   try {
-//     if (!Array.isArray(clients)) {
-//       // ask loadClients to fetch; it returns an array or [] on error
-//       clients = await (typeof loadClients === 'function' ? loadClients() : Promise.resolve([]));
-//     }
-//   } catch (err) {
-//     console.error('renderClientsTable: loadClients failed', err);
-//     container.innerHTML = `<div style="padding:16px;color:#a00">Failed to load clients.</div>`;
-//     return;
-//   }
-
-//   // Build table HTML
-//   const cols = [
-//     { key: 'id', label: 'ID' },
-//     { key: 'name', label: 'Name' },
-//     { key: 'address_line1', label: 'Address Line 1 (Billed)' },
-//     { key: 'address_line2', label: 'Address Line 2 (Shipped)' },
-//     { key: 'po_dated', label: 'PO/Dated' },
-//     { key: 'state', label: 'State' },
-//     { key: 'district', label: 'District' },
-//     { key: 'contact_person', label: 'Contact Person' },
-//     { key: 'telephone', label: 'Telephone' },
-//     { key: 'email', label: 'Email' },
-//     { key: 'gst_number', label: 'GST Number' },
-//     { key: 'cgst', label: 'CGST (%)' },
-//     { key: 'sgst', label: 'SGST (%)' },
-//     { key: 'igst', label: 'IGST (%)' },
-//     { key: 'categories', label: 'Categories' }
-//   ];
-
-//   let html = `
-//     <div class="responsive-table" style="overflow:auto;">
-//       <table class="table" id="clients-table" style="width:100%;border-collapse:collapse;">
-//         <thead>
-//           <tr>
-//             ${cols.map(c=>`<th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">${esc(c.label)}</th>`).join('')}
-//             <th style="padding:8px;border-bottom:1px solid #ddd;text-align:left;">Actions</th>
-//           </tr>
-//         </thead>
-//         <tbody>
-//   `;
-
-//   if (!clients || clients.length === 0) {
-//     html += `<tr><td colspan="${cols.length+1}" style="padding:16px">No clients found.</td></tr>`;
-//   } else {
-//     for (const c of clients) {
-//       // normalize fields and fallbacks
-//       const addr1 = (c.address_line1 && String(c.address_line1).trim()) ? c.address_line1 : (c.address || '');
-//       const addr2 = (c.address_line2 && String(c.address_line2).trim()) ? c.address_line2 : '';
-//       const contact = (c.contact_person && String(c.contact_person).trim()) ? c.contact_person : (c.contact || '');
-//       const telephone = c.telephone || '';
-//       const cats = Array.isArray(c.categories) ? c.categories.join(', ') : (c.categories || '');
-
-//       html += `<tr data-client-id="${esc(c.id)}">`;
-//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.id)}</td>`;
-//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.name)}</td>`;
-//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(addr1)}</td>`;
-//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(addr2)}</td>`;
-//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.po_dated || '')}</td>`;
-//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.state || '')}</td>`;
-//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.district || '')}</td>`;
-//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(contact)}</td>`;
-//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(telephone)}</td>`;
-//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.email || '')}</td>`;
-//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.gst_number || '')}</td>`;
-//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.cgst ?? '')}</td>`;
-//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.sgst ?? '')}</td>`;
-//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(c.igst ?? '')}</td>`;
-//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">${esc(cats)}</td>`;
-
-//       // Actions - we create buttons with data attributes and use event delegation below
-//       html += `<td style="padding:8px;border-bottom:1px solid #eee;">`;
-//       html += `<button class="btn-action btn-edit" data-action="edit" data-id="${esc(c.id)}" style="margin-right:8px">Edit</button>`;
-//       html += `<button class="btn-action btn-delete" data-action="delete" data-id="${esc(c.id)}" style="margin-right:8px">Delete</button>`;
-//       html += `</td>`;
-
-//       html += `</tr>`;
-//     }
-//   }
-
-//   html += `</tbody></table></div>`;
-
-//   // Replace container with new table
-//   container.innerHTML = html;
-
-//   // Event delegation for Actions (Edit / Delete)
-//   // Remove previous listener to avoid duplicates
-//   if (window.__clients_action_handler_attached) {
-//     // already attached
-//   } else {
-//     window.__clients_action_handler_attached = true;
-//     container.addEventListener('click', async function(ev) {
-//       const btn = ev.target.closest('.btn-action');
-//       if (!btn) return;
-//       const action = btn.getAttribute('data-action');
-//       const id = btn.getAttribute('data-id');
-//       if (!action || !id) return;
-
-//       if (action === 'edit') {
-//         // navigate to your edit UI or open modal (implement onEditClient as you like)
-//         if (typeof window.onEditClient === 'function') {
-//           window.onEditClient(Number(id));
-//         } else {
-//           // default: open client edit page if present
-//           window.location.href = `/client-edit.html?id=${encodeURIComponent(id)}`;
-//         }
-//       } else if (action === 'delete') {
-//         if (!confirm('Delete client ID ' + id + '? This cannot be undone.')) return;
-//         try {
-//           const resp = await fetch(`/api/clients/${encodeURIComponent(id)}`, {
-//             method: 'DELETE',
-//             credentials: 'include',
-//             headers: { 'Content-Type': 'application/json' }
-//           });
-//           if (!resp.ok) {
-//             const text = await resp.text().catch(()=>null);
-//             alert('Delete failed: ' + (text || resp.status));
-//             console.error('Delete client failed', resp.status, text);
-//             return;
-//           }
-//           // success — reload table
-//           await renderClientsTable(); // re-fetch and render
-//         } catch (err) {
-//           console.error('Delete client error', err);
-//           alert('Network error while deleting client.');
-//         }
-//       }
-//     }, false);
-//   }
-
-//   return clients;
-// };
-// // end renderer
-
-
-// // window.renderClientsTable = (clients = []) => {
-// //   // Normalize array safely
-// //   const normalized = (clients || []).map(normalizeClient);
-
-// //   // find table container — try common IDs, otherwise create one in #content
-// //   let container = document.getElementById('clients-table-container');
-// //   if (!container) {
-// //     const content = document.getElementById('content') || document.body;
-// //     container = document.createElement('div');
-// //     container.id = 'clients-table-container';
-// //     // don't clear whole content (keeps dashboard buttons intact)
-// //     content.appendChild(container);
-// //   }
-
-// //   // Build table HTML (responsive horizontally)
-// //   let html = `<div style="overflow:auto"><table class="clients-table" border="1" cellpadding="6" style="border-collapse:collapse;width:100%;min-width:1200px">
-// //     <thead style="background:#f2f2f2">
-// //       <tr>
-// //         <th>#</th>
-// //         <th>Name</th>
-// //         <th>Address Line 1 (Billed)</th>
-// //         <th>Address Line 2 (Shipped)</th>
-// //         <th>PO/Dated</th>
-// //         <th>State</th>
-// //         <th>District</th>
-// //         <th>Contact Person</th>
-// //         <th>Telephone</th>
-// //         <th>Email</th>
-// //         <th>GST</th>
-// //         <th>IGST (%)</th>
-// //         <th>CGST (%)</th>
-// //         <th>SGST (%)</th>
-// //         <th>Categories</th>
-// //         <th>Actions</th>
-// //       </tr>
-// //     </thead>
-// //     <tbody>`;
-
-// //   normalized.forEach((c, idx) => {
-// //     // prepare categories text if backend returns categories array or string
-// //     let catText = '';
-// //     if (Array.isArray(c.categories) && c.categories.length) {
-// //       // support either {category, monthly_rate} or simple strings
-// //       catText = c.categories.map(cc => {
-// //         if (!cc) return '';
-// //         if (typeof cc === 'string') return escapeHtml(cc);
-// //         if (typeof cc === 'object') {
-// //           const catName = cc.category ?? cc.name ?? Object.values(cc)[0] ?? '';
-// //           const mrate = cc.monthly_rate ?? cc.rate ?? cc.monthly ?? '';
-// //           return `${escapeHtml(String(catName))}${mrate ? `: ₹${escapeHtml(String(mrate))}` : ''}`;
-// //         }
-// //         return escapeHtml(String(cc));
-// //       }).filter(Boolean).join(', ');
-// //     } else if (typeof c.categories === 'string' && c.categories.trim()) {
-// //       catText = escapeHtml(c.categories);
-// //     } else {
-// //       catText = '';
-// //     }
-
-// //     html += `<tr>
-// //       <td>${idx+1}</td>
-// //       <td>${escapeHtml(c.name)}</td>
-// //       <td>${escapeHtml(c.address_line1 || '')}</td>
-// //       <td>${escapeHtml(c.address_line2 || '')}</td>
-// //       <td>${escapeHtml(c.po_dated || '')}</td>
-// //       <td>${escapeHtml(c.state || '')}</td>
-// //       <td>${escapeHtml(c.district || '')}</td>
-// //       <td>${escapeHtml(c.contact_person || '')}</td>
-// //       <td>${escapeHtml(c.telephone || '')}</td>
-// //       <td>${escapeHtml(c.email || '')}</td>
-// //       <td>${escapeHtml(c.gst_number || '')}</td>
-// //       <td>${c.igst ?? ''}</td>
-// //       <td>${c.cgst ?? ''}</td>
-// //       <td>${c.sgst ?? ''}</td>
-// //       <td>${escapeHtml(catText)}</td>
-// //       <td>
-// //         <button data-id="${escapeHtml(c.id)}" class="editClientBtn">Edit</button>
-// //         <button data-id="${escapeHtml(c.id)}" class="deleteClientBtn">Delete</button>
-// //         <button data-id="${escapeHtml(c.id)}" class="addCatBtn">Add Category</button>
-// //       </td>
-// //     </tr>`;
-// //   });
-
-// //   html += `</tbody></table></div>`;
-
-// //   container.innerHTML = html;
-
-// //   // attach actions
-// //   container.querySelectorAll('.editClientBtn').forEach(btn=>{
-// //     btn.onclick = (e) => {
-// //       const id = e.currentTarget.getAttribute('data-id');
-// //       if (id) window.openEditClient(Number(id));
-// //     };
-// //   });
-// //   container.querySelectorAll('.deleteClientBtn').forEach(btn=>{
-// //     btn.onclick = async (e) => {
-// //       const id = e.currentTarget.getAttribute('data-id');
-// //       if (!id) return;
-// //       if (!confirm('Delete this client?')) return;
-// //       try {
-// //         const r = await fetch(`/api/clients/${id}`, { method: 'DELETE' });
-// //         if (!r.ok) throw new Error(await r.text());
-// //         alert('Deleted');
-// //         if (window.refreshClientsTable) window.refreshClientsTable();
-// //         else if (window.showTable) window.showTable('clients');
-// //       } catch (err) {
-// //         console.error('delete client error', err);
-// //         alert('Delete failed — see console');
-// //       }
-// //     };
-// //   });
-// //   container.querySelectorAll('.addCatBtn').forEach(btn=>{
-// //     btn.onclick = (e) => {
-// //       const id = e.currentTarget.getAttribute('data-id');
-// //       if (id) window.showCategoryForm(Number(id));
-// //     };
-// //   });
-// // };
-
-// // /* optional helper to call if you need: */
-// // if (!window.refreshClientsTable) {
-// //   window.refreshClientsTable = async () => {
-// //     try {
-// //       const clients = await loadClients();
-// //       // in case backend returns object {data: [...]}
-// //       const arr = Array.isArray(clients) ? clients : (clients.data && Array.isArray(clients.data) ? clients.data : []);
-// //       window.renderClientsTable(arr);
-// //     } catch (e) {
-// //       console.error('refreshClientsTable error', e);
-// //     }
-// //   };
-// // }
-
-// // /* Also expose a safe Create button helper that UI can call */
-// // window.showClientForm = () => window.openCreateClientModal();
-
-// // /* End of patch */
