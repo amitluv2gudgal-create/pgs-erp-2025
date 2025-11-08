@@ -206,6 +206,13 @@ export async function initDB() {
     await ensureClientExtraFields();
     await ensureRequestsApproverColumn();
 
+    // Remove legacy columns if present (safe no-op if not present)
+    try {
+      await dropLegacyClientAddressColumn();
+    } catch (err) {
+      console.warn('[db] Warning while attempting to drop legacy columns (ignored):', err && err.message ? err.message : err);
+    }
+
     console.log('[db] initialization completed');
     return db;
   } catch (err) {
@@ -274,6 +281,48 @@ export async function ensureRequestsApproverColumn() {
 }
 
 /**
+ * dropLegacyClientAddressColumn
+ *
+ * Exported because server.js expects it. This function is safe and idempotent.
+ * It checks for legacy column names like "Address" or "Contact" (case variations)
+ * in the clients table, and attempts to drop them if present. If the SQLite
+ * version does not support ALTER TABLE ... DROP COLUMN, it logs and skips.
+ */
+export async function dropLegacyClientAddressColumn() {
+  if (!db) throw new Error('DB not initialized');
+  try {
+    const rows = await db.all("PRAGMA table_info(clients);");
+    const colNames = Array.isArray(rows) ? rows.map(r => r.name) : [];
+
+    // list of legacy columns your older code used; user said they removed 'Address' and 'Contact'
+    const legacyCandidates = ['Address', 'Contact', 'address', 'contact'];
+
+    for (const legacy of legacyCandidates) {
+      if (colNames.includes(legacy)) {
+        console.log(`[db] Legacy column detected: "${legacy}". Attempting to drop it.`);
+
+        try {
+          // attempt to drop column (SQLite >= 3.35 supports this)
+          await db.exec(`ALTER TABLE clients DROP COLUMN "${legacy}";`);
+          console.log(`[db] Dropped legacy column "${legacy}" from clients table.`);
+        } catch (errDrop) {
+          // if DROP COLUMN not supported or fails, log a helpful message and continue
+          console.warn(`[db] Could not DROP COLUMN "${legacy}". This may be due to SQLite version. Error:`, errDrop && errDrop.message ? errDrop.message : errDrop);
+          // as a safe fallback, we leave the column untouched; it's harmless
+        }
+      } else {
+        // column not present; nothing to do
+        // console.log(`[db] Legacy column "${legacy}" not present.`);
+      }
+    }
+  } catch (err) {
+    console.error('[db] dropLegacyClientAddressColumn failed:', err && err.message ? err.message : err);
+    // rethrow so callers can handle if necessary
+    throw err;
+  }
+}
+
+/**
  * Simple query/run wrappers (export to controllers)
  */
 export const query = async (sql, params = []) => {
@@ -291,6 +340,7 @@ export const dbModule = {
   initDB,
   ensureClientExtraFields,
   ensureRequestsApproverColumn,
+  dropLegacyClientAddressColumn,
   query,
   run
 };
@@ -300,6 +350,7 @@ export default {
   initDB,
   ensureClientExtraFields,
   ensureRequestsApproverColumn,
+  dropLegacyClientAddressColumn,
   query,
   run,
   dbModule,
