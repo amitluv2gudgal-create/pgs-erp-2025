@@ -6,6 +6,16 @@ import { query, run } from '../db.js';
 const router = express.Router();
 
 /**
+ * cookie options for manual Set-Cookie (kept consistent with server session config)
+ */
+const cookieOptions = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax',
+  maxAge: 1000 * 60 * 60 * 6 // 6 hours
+};
+
+/**
  * Utility middlewares (session-based)
  */
 function requireAuth(req, res, next) {
@@ -33,7 +43,7 @@ router.post('/login', async (req, res) => {
       const user = users[0];
       const match = await bcrypt.compare(password, user.password);
       if (match) {
-        // regenerate session to avoid fixation
+        // regenerate session to avoid fixation and save it
         return req.session.regenerate((err) => {
           if (err) {
             console.error('Session regenerate error:', err);
@@ -45,6 +55,14 @@ router.post('/login', async (req, res) => {
               console.error('Session save error:', err2);
               return res.status(500).json({ error: 'Session save error' });
             }
+
+            // Ensure cookie is explicitly set so clients (curl/browser) receive connect.sid
+            try {
+              res.cookie('connect.sid', req.sessionID, cookieOptions);
+            } catch (cookieErr) {
+              console.warn('[auth] Warning: failed to set cookie explicitly', cookieErr);
+            }
+
             return res.json({ success: true, role: user.role, username: user.username });
           });
         });
@@ -68,6 +86,14 @@ router.post('/login', async (req, res) => {
               console.error('Session save error:', err2);
               return res.status(500).json({ error: 'Session save error' });
             }
+
+            // Explicitly set cookie
+            try {
+              res.cookie('connect.sid', req.sessionID, cookieOptions);
+            } catch (cookieErr) {
+              console.warn('[auth] Warning: failed to set cookie explicitly', cookieErr);
+            }
+
             return res.json({ success: true, role: 'security_supervisor', username: supervisor.username });
           });
         });
@@ -89,8 +115,8 @@ router.get('/logout', (req, res) => {
       console.error('Logout error:', err);
       return res.status(500).json({ error: 'Failed to logout' });
     }
-    // If client expects redirect, this will send it; else client can call /api/auth/logout and handle
-    res.clearCookie?.('connect.sid');
+    // clear cookie
+    try { res.clearCookie('connect.sid', { path: '/' }); } catch(_) {}
     res.redirect('/login.html');
   });
 });
