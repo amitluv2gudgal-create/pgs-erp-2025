@@ -1,15 +1,16 @@
 // public/js/clients.js
-// Safe, idempotent clients loader + renderer for PGS-ERP
-// Exports: loadClients()
+// Robust clients loader + renderer for PGS-ERP
+// - idempotent (guarded)
+// - cleans duplicate script tags / duplicate containers if present
+// - exposes loadClients(), renderClientsTable(), refreshClientsTable(), openCreateClient()
 
-// ---------- guard: avoid double-init when file is loaded more than once ----------
+/* Guard: avoid double-init when file loads more than once */
 if (window.__pgs_clients_module_loaded) {
-  // already loaded on this page — nothing to do
-  console.warn('[clients.js] module already loaded — skipping second init');
+  console.warn('[clients.js] module already loaded — skipping duplicate init');
 } else {
   window.__pgs_clients_module_loaded = true;
 
-  // ------------------ helpers ------------------
+  // ----------------- helpers -----------------
   function escapeHtml(s) {
     if (s == null) return '';
     return String(s)
@@ -22,20 +23,20 @@ if (window.__pgs_clients_module_loaded) {
 
   function normalizeClient(c = {}) {
     const o = Object.assign({}, c);
-    o.address_line1 = o.address_line1 ?? o.address ?? o.addr ?? o.address1 ?? (o.address_full ? String(o.address_full).split('\n')[0] : '') ?? '';
-    o.address_line2 = o.address_line2 ?? o.address2 ?? o.addr2 ?? (o.address_full ? String(o.address_full).split('\n').slice(1).join(', ') : '') ?? '';
-    o.contact_person = o.contact_person ?? o.contact ?? o.contact_name ?? o.person ?? o.manager ?? '';
+    o.address_line1 = o.address_line1 ?? o.address ?? o.addr ?? o.address1 ?? '';
+    o.address_line2 = o.address_line2 ?? o.address2 ?? o.addr2 ?? '';
+    o.contact_person = o.contact_person ?? o.contact ?? o.contact_name ?? '';
     o.telephone = o.telephone ?? o.phone ?? o.tel ?? o.mobile ?? '';
-    o.email = o.email ?? o.email_address ?? o.contact_email ?? '';
+    o.email = o.email ?? o.email_address ?? '';
     o.gst_number = o.gst_number ?? o.gst ?? o.gstin ?? '';
-    o.igst = (o.igst !== undefined && o.igst !== null && o.igst !== '') ? o.igst : (o.IGST !== undefined ? o.IGST : '');
-    o.cgst = (o.cgst !== undefined && o.cgst !== null && o.cgst !== '') ? o.cgst : (o.CGST !== undefined ? o.CGST : '');
-    o.sgst = (o.sgst !== undefined && o.sgst !== null && o.sgst !== '') ? o.sgst : (o.SGST !== undefined ? o.SGST : '');
+    o.igst = (o.igst !== undefined && o.igst !== null && o.igst !== '') ? o.igst : '';
+    o.cgst = (o.cgst !== undefined && o.cgst !== null && o.cgst !== '') ? o.cgst : '';
+    o.sgst = (o.sgst !== undefined && o.sgst !== null && o.sgst !== '') ? o.sgst : '';
 
     if (Array.isArray(o.categories)) {
       // ok
     } else if (typeof o.categories === 'string' && o.categories.trim().length > 0) {
-      // keep string as-is
+      // keep string
     } else if (o.client_categories && Array.isArray(o.client_categories)) {
       o.categories = o.client_categories;
     } else {
@@ -45,12 +46,41 @@ if (window.__pgs_clients_module_loaded) {
     return o;
   }
 
-  // ------------------ renderer ------------------
+  // ----------------- DOM cleanup to remove duplicates -----------------
+  (function cleanupDuplicateUI() {
+    // Remove duplicate <script> tags that load clients.js (keep first)
+    try {
+      const scriptSrcMatches = Array.from(document.querySelectorAll('script[src]'))
+        .filter(s => s.src && s.src.indexOf('clients.js') !== -1);
+      if (scriptSrcMatches.length > 1) {
+        scriptSrcMatches.slice(1).forEach(s => {
+          console.warn('[clients.js] removing duplicate script tag', s.src);
+          s.parentNode && s.parentNode.removeChild(s);
+        });
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // Normalize: keep only first clients table container if multiples exist
+    try {
+      const containers = document.querySelectorAll('#clients-table-container');
+      if (containers.length > 1) {
+        containers.forEach((c, i) => {
+          if (i > 0) {
+            console.warn('[clients.js] removing duplicate #clients-table-container', c);
+            c.remove();
+          }
+        });
+      }
+    } catch (e) {}
+  })();
+
+
+  // ----------------- Renderer -----------------
   window.renderClientsTable = async function renderClientsTable(clients) {
     const container = document.querySelector('#clients-table-container') || document.querySelector('#table-container') || document.getElementById('content') || document.body;
     if (!container) return console.warn('[renderClientsTable] No container found for clients table');
-
-    const esc = (s) => (s == null ? '' : escapeHtml(s));
 
     container.innerHTML = `<div style="padding:10px">Building clients table…</div>`;
 
@@ -75,6 +105,8 @@ if (window.__pgs_clients_module_loaded) {
       { key: 'igst', label: 'IGST (%)' },
       { key: 'categories', label: 'Categories' }
     ];
+
+    const esc = s => (s == null ? '' : escapeHtml(s));
 
     let html = `<div class="responsive-table"><table id="clients-table" class="clients-table"><thead><tr>`;
     html += cols.map(c => `<th>${esc(c.label)}</th>`).join('');
@@ -112,7 +144,16 @@ if (window.__pgs_clients_module_loaded) {
     html += `</tbody></table></div>`;
     container.innerHTML = html;
 
-    // attach delegated event listener only once per container
+    // Remove any accidental duplicate table elements (keep first)
+    try {
+      const tables = document.querySelectorAll('table.clients-table');
+      if (tables.length > 1) {
+        tables.forEach((t, i) => { if (i > 0) t.remove(); });
+        console.warn('[clients.js] removed extra clients-table elements');
+      }
+    } catch (e) {}
+
+    // Attach a single delegated click handler to the container (only once)
     if (!container.__clients_action_handler_attached) {
       container.__clients_action_handler_attached = true;
       container.addEventListener('click', async function (ev) {
@@ -133,16 +174,12 @@ if (window.__pgs_clients_module_loaded) {
           try {
             const resp = await fetch(`/api/clients/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'include' });
             if (!resp.ok) {
-              const text = await resp.text().catch(() => null);
+              const text = await resp.text().catch(()=>null);
               alert('Delete failed: ' + (text || resp.status));
               return;
             }
             // refresh table
-            if (typeof window.refreshClientsTable === 'function') {
-              await window.refreshClientsTable();
-            } else {
-              await window.renderClientsTable();
-            }
+            await window.refreshClientsTable();
           } catch (err) {
             console.error('Delete client error', err);
             alert('Network error while deleting client.');
@@ -154,50 +191,82 @@ if (window.__pgs_clients_module_loaded) {
     return clients;
   };
 
-  // convenience refresher used elsewhere
+  // ----------------- refresh helper -----------------
   window.refreshClientsTable = async function refreshClientsTable() {
     const clients = await loadClients();
     return window.renderClientsTable(clients);
   };
 
-  // Do NOT auto-run here — app.js or a single controller should invoke loadClients()
-  // This file is intentionally library-like to avoid duplicate renderings.
+  // ----------------- openCreateClient helper -----------------
+  // When Create Client button is clicked, prefer modal if exists, otherwise redirect to client-create page
+  window.openCreateClient = function openCreateClient() {
+    // Try modal id first
+    const modal = document.getElementById('client-create-modal');
+    const createPage = '/client-create.html';
+    if (modal) {
+      modal.style.display = 'block';
+      if (typeof modal.showModal === 'function') {
+        try { modal.showModal(); } catch(e) {}
+      }
+      return;
+    }
+    // fallback redirect
+    window.location.href = createPage;
+  };
+
+  // Attach create-client button handler (if present)
+  (function attachCreateButton() {
+    try {
+      const btn = document.getElementById('create-client-btn') || document.querySelector('[data-action="create-client"]') || document.querySelector('.btn-create-client');
+      if (btn && !btn.__clients_create_attached) {
+        btn.__clients_create_attached = true;
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          window.openCreateClient();
+        });
+      }
+    } catch (e) {}
+  })();
+
+  // Do NOT auto-run loadClients() here. Let app.js or the page call loadClients when appropriate.
+  // But if caller forgot, ensure page has the clients table present by calling loadClients once if nothing triggers it within a short time.
+  setTimeout(() => {
+    try {
+      const container = document.querySelector('#clients-table-container') || document.querySelector('#table-container') || document.getElementById('content');
+      const firstTable = document.querySelector('table.clients-table');
+      // If there's no table yet and nobody else has called loadClients, call it once to populate
+      if (container && !firstTable && !window.__pgs_clients_loaded_once) {
+        window.__pgs_clients_loaded_once = true;
+        loadClients();
+      }
+    } catch (e) {}
+  }, 300);
 }
 
-// ------------------ loader (exported) ------------------
-export async function loadClients() {
-    // find best container (apps vary)
+// ----------------- API loader (exported) -----------------
+ export async function loadClients() {
     const container = document.querySelector('#clients-table-container') || document.querySelector('#table-container') || document.getElementById('content') || document.body;
     if (container) container.innerHTML = `<div class="loading">Loading clients…</div>`;
-
     try {
       const resp = await fetch('/api/clients', { credentials: 'include' });
 
       if (resp.status === 401) {
-        if (container) container.innerHTML = `
-          <div style="padding:16px;color:#a00">
-            You are not signed in. <a href="/login.html">Sign in</a> to view clients.
-          </div>`;
+        if (container) container.innerHTML = `<div style="padding:16px;color:#a00">You are not signed in. <a href="/login.html">Sign in</a> to view clients.</div>`;
         console.warn('[loadClients] 401 Unauthorized');
         return [];
       }
 
-      const contentType = (resp.headers.get('content-type') || '').toLowerCase();
-
-      if (!resp.ok && contentType.includes('application/json')) {
-        const json = await resp.json().catch(() => ({}));
-        if (container) container.innerHTML = `<div style="padding:16px;color:#a00">Server error ${resp.status}: ${escapeHtml(json.error || JSON.stringify(json))}</div>`;
+      const ct = (resp.headers.get('content-type') || '').toLowerCase();
+      if (!resp.ok) {
+        const json = ct.includes('application/json') ? await resp.json().catch(()=>({})) : null;
+        if (container) container.innerHTML = `<div style="padding:16px;color:#a00">Server error ${resp.status}: ${escapeHtml(json && json.error ? json.error : String(json || ''))}</div>`;
         console.error('[loadClients] server error', resp.status, json);
         return [];
       }
 
-      if (!contentType.includes('application/json')) {
-        const body = await resp.text().catch(() => '(no body)');
-        if (container) container.innerHTML = `<div style="padding:16px;color:#a00">
-          Unexpected server response (expected JSON). This often means you're not logged in. <a href="/login.html">Sign in</a>.
-          <pre style="white-space:pre-wrap">${escapeHtml(body.slice(0, 800))}</pre>
-        </div>`;
-        console.warn('[loadClients] Non-JSON response prevented from being injected');
+      if (!ct.includes('application/json')) {
+        const body = await resp.text().catch(()=>'(no body)');
+        if (container) container.innerHTML = `<div style="padding:16px;color:#a00">Unexpected server response (expected JSON). Try signing in. <pre>${escapeHtml(body.slice(0,800))}</pre></div>`;
         return [];
       }
 
@@ -205,8 +274,6 @@ export async function loadClients() {
       const clients = Array.isArray(payload) ? payload : (payload && payload.clients ? payload.clients : []);
       if (typeof window.renderClientsTable === 'function') {
         window.renderClientsTable(clients);
-      } else if (container) {
-        container.innerHTML = `<div style="padding:16px">Found ${clients.length} clients</div>`;
       }
       return clients;
     } catch (err) {
