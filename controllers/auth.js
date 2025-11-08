@@ -117,3 +117,5 @@ export async function requireAuth(req, res, next) {
 export function getSession(sid) {
   return sessions.get(sid);
 }
+
+export default router; 
