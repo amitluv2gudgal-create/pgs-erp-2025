@@ -1,6 +1,7 @@
 // controllers/auth.js
 import express from 'express';
 import bcrypt from 'bcrypt';
+import cookieSignature from 'cookie-signature';
 import { query, run } from '../db.js';
 
 const router = express.Router();
@@ -30,6 +31,20 @@ function requireRole(...roles) {
   };
 }
 
+// Helper to set a signed cookie that express-session will accept.
+function setSignedSessionCookie(res, sessionId) {
+  const secret = process.env.SESSION_SECRET || '';
+  // cookie-signature.sign returns a signature string (without 's:' prefix)
+  try {
+    const signed = 's:' + cookieSignature.sign(sessionId, secret);
+    res.cookie('connect.sid', signed, cookieOptions);
+  } catch (err) {
+    console.warn('[auth] Could not set signed cookie:', err && err.message ? err.message : err);
+    // fallback: set raw cookie (less secure)
+    try { res.cookie('connect.sid', sessionId, cookieOptions); } catch (_) {}
+  }
+}
+
 // ================== LOGIN (users + security supervisors) ==================
 router.post('/login', async (req, res) => {
   const { username, password } = req.body || {};
@@ -56,12 +71,8 @@ router.post('/login', async (req, res) => {
               return res.status(500).json({ error: 'Session save error' });
             }
 
-            // Ensure cookie is explicitly set so clients (curl/browser) receive connect.sid
-            try {
-              res.cookie('connect.sid', req.sessionID, cookieOptions);
-            } catch (cookieErr) {
-              console.warn('[auth] Warning: failed to set cookie explicitly', cookieErr);
-            }
+            // Set a signed cookie so subsequent requests are accepted by express-session
+            setSignedSessionCookie(res, req.sessionID);
 
             return res.json({ success: true, role: user.role, username: user.username });
           });
@@ -87,12 +98,8 @@ router.post('/login', async (req, res) => {
               return res.status(500).json({ error: 'Session save error' });
             }
 
-            // Explicitly set cookie
-            try {
-              res.cookie('connect.sid', req.sessionID, cookieOptions);
-            } catch (cookieErr) {
-              console.warn('[auth] Warning: failed to set cookie explicitly', cookieErr);
-            }
+            // set signed cookie
+            setSignedSessionCookie(res, req.sessionID);
 
             return res.json({ success: true, role: 'security_supervisor', username: supervisor.username });
           });
@@ -130,75 +137,52 @@ router.get('/current-user', (req, res) => {
   }
 });
 
-// ================== CHANGE PASSWORD (self) ==================
-// Only for admin, accountant, hr
-// Body: { currentPassword, newPassword }
-router.post(
-  '/change-password',
-  requireAuth,
-  requireRole('admin', 'accountant', 'hr'),
-  async (req, res) => {
-    try {
-      const { currentPassword, newPassword } = req.body || {};
-      const me = req.session.user;
-      if (!currentPassword || !newPassword) {
-        return res.status(400).json({ error: 'currentPassword and newPassword are required' });
-      }
-      if (String(newPassword).length < 8) {
-        return res.status(400).json({ error: 'New password must be at least 8 characters' });
-      }
-
-      // Only in users table (admin/accountant/hr live there)
-      const rows = await query('SELECT id, password FROM users WHERE id = ?', [me.id]);
-      if (!rows.length) return res.status(404).json({ error: 'User not found' });
-
-      const ok = await bcrypt.compare(currentPassword, rows[0].password);
-      if (!ok) return res.status(400).json({ error: 'Current password is incorrect' });
-
-      const hash = await bcrypt.hash(newPassword, 10);
-      await run('UPDATE users SET password = ? WHERE id = ?', [hash, me.id]);
-
-      return res.json({ ok: true, message: 'Password changed successfully' });
-    } catch (err) {
-      console.error('change-password error:', err);
-      return res.status(500).json({ error: 'Server error' });
+// ================== CHANGE / RESET / LOOKUP endpoints (unchanged) ==================
+router.post('/change-password', requireAuth, requireRole('admin', 'accountant', 'hr'), async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    const me = req.session.user;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'currentPassword and newPassword are required' });
     }
-  }
-);
-
-// ================== ADMIN RESET PASSWORD (others) ==================
-router.post(
-  '/admin/reset-password',
-  requireAuth,
-  requireRole('admin'),
-  async (req, res) => {
-    try {
-      const { userId, role, newPassword } = req.body || {};
-      if (!userId || !newPassword || !role) {
-        return res.status(400).json({ error: 'userId, role and newPassword are required' });
-      }
-      if (String(newPassword).length < 8) {
-        return res.status(400).json({ error: 'New password must be at least 8 characters' });
-      }
-
-      const hash = await bcrypt.hash(newPassword, 10);
-      if (role === 'security_supervisor') {
-        // Reset in security_supervisors
-        await run('UPDATE security_supervisors SET password = ? WHERE id = ?', [hash, userId]);
-      } else {
-        // Reset in users (admin/accountant/hr)
-        await run('UPDATE users SET password = ? WHERE id = ?', [hash, userId]);
-      }
-
-      return res.json({ ok: true, message: 'Password reset successfully' });
-    } catch (err) {
-      console.error('admin-reset-password error:', err);
-      return res.status(500).json({ error: 'Server error' });
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters' });
     }
+    const rows = await query('SELECT id, password FROM users WHERE id = ?', [me.id]);
+    if (!rows.length) return res.status(404).json({ error: 'User not found' });
+    const ok = await bcrypt.compare(currentPassword, rows[0].password);
+    if (!ok) return res.status(400).json({ error: 'Current password is incorrect' });
+    const hash = await bcrypt.hash(newPassword, 10);
+    await run('UPDATE users SET password = ? WHERE id = ?', [hash, me.id]);
+    return res.json({ ok: true, message: 'Password changed successfully' });
+  } catch (err) {
+    console.error('change-password error:', err);
+    return res.status(500).json({ error: 'Server error' });
   }
-);
+});
 
-// Admin lookup to resolve a username to ID
+router.post('/admin/reset-password', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { userId, role, newPassword } = req.body || {};
+    if (!userId || !newPassword || !role) {
+      return res.status(400).json({ error: 'userId, role and newPassword are required' });
+    }
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters' });
+    }
+    const hash = await bcrypt.hash(newPassword, 10);
+    if (role === 'security_supervisor') {
+      await run('UPDATE security_supervisors SET password = ? WHERE id = ?', [hash, userId]);
+    } else {
+      await run('UPDATE users SET password = ? WHERE id = ?', [hash, userId]);
+    }
+    return res.json({ ok: true, message: 'Password reset successfully' });
+  } catch (err) {
+    console.error('admin-reset-password error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
 router.get('/lookup-user', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const role = String(req.query.role || '').trim();
@@ -209,14 +193,12 @@ router.get('/lookup-user', requireAuth, requireRole('admin'), async (req, res) =
     if (!['admin','accountant','hr','security_supervisor'].includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
     }
-
     let rows;
     if (role === 'security_supervisor') {
       rows = await query('SELECT id, username FROM security_supervisors WHERE username = ?', [username]);
     } else {
       rows = await query('SELECT id, username, role FROM users WHERE username = ? AND role = ?', [username, role]);
     }
-
     if (!rows.length) return res.status(404).json({ error: 'User not found' });
     const row = rows[0];
     return res.json({ ok: true, id: row.id, role, username: row.username || username });
@@ -226,7 +208,6 @@ router.get('/lookup-user', requireAuth, requireRole('admin'), async (req, res) =
   }
 });
 
-// Admin reset password for any user (duplicate-safe endpoint)
 router.post('/admin/reset-password', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const { userId, role, newPassword } = req.body || {};
@@ -239,9 +220,7 @@ router.post('/admin/reset-password', requireAuth, requireRole('admin'), async (r
     if (!['admin','accountant','hr','security_supervisor'].includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
     }
-
     const hash = await bcrypt.hash(newPassword, 10);
-
     if (role === 'security_supervisor') {
       const exists = await query('SELECT id FROM security_supervisors WHERE id = ?', [userId]);
       if (!exists.length) return res.status(404).json({ error: 'Supervisor not found' });
@@ -251,7 +230,6 @@ router.post('/admin/reset-password', requireAuth, requireRole('admin'), async (r
       if (!exists.length) return res.status(404).json({ error: 'User not found' });
       await run('UPDATE users SET password = ? WHERE id = ?', [hash, userId]);
     }
-
     return res.json({ ok: true, message: 'Password reset successfully' });
   } catch (err) {
     console.error('POST /admin/reset-password error:', err);
