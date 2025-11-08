@@ -79,19 +79,19 @@ export async function initDB() {
     await db.exec(`CREATE TABLE IF NOT EXISTS clients (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT,
-      address TEXT,
       address_line1 TEXT,
       address_line2 TEXT,
       po_dated TEXT,
       state TEXT,
       district TEXT,
-      contact TEXT,
+      contact_person TEXT,
       telephone TEXT,
       email TEXT,
       gst_number TEXT,
-      cgst REAL,
-      sgst REAL,
-      igst REAL
+      cgst REAL DEFAULT 0,
+      sgst REAL DEFAULT 0,
+      igst REAL DEFAULT 0,
+      categories TEXT
     );`);
 
     await db.exec(`CREATE TABLE IF NOT EXISTS client_categories (
@@ -186,6 +186,7 @@ export async function initDB() {
       new_data TEXT,
       status TEXT DEFAULT 'pending',
       approver_id INTEGER,
+      approver_comment TEXT,
       FOREIGN KEY(requester_id) REFERENCES users(id)
     );`);
 
@@ -204,7 +205,6 @@ export async function initDB() {
     // Safe migrations: add missing columns if needed
     await ensureClientExtraFields();
     await ensureRequestsApproverColumn();
-    await dropLegacyClientAddressColumn();
 
     console.log('[db] initialization completed');
     return db;
@@ -230,9 +230,25 @@ export async function ensureClientExtraFields() {
     }
     if (!colNames.includes('igst')) {
       console.log('[db] Adding igst column to clients');
-      await db.exec("ALTER TABLE clients ADD COLUMN igst REAL;");
+      await db.exec("ALTER TABLE clients ADD COLUMN igst REAL DEFAULT 0;");
     } else {
       console.log('[db] clients.igst exists');
+    }
+    if (!colNames.includes('cgst')) {
+      console.log('[db] Adding cgst column to clients');
+      await db.exec("ALTER TABLE clients ADD COLUMN cgst REAL DEFAULT 0;");
+    }
+    if (!colNames.includes('sgst')) {
+      console.log('[db] Adding sgst column to clients');
+      await db.exec("ALTER TABLE clients ADD COLUMN sgst REAL DEFAULT 0;");
+    }
+    if (!colNames.includes('contact_person')) {
+      console.log('[db] Adding contact_person column to clients');
+      await db.exec("ALTER TABLE clients ADD COLUMN contact_person TEXT;");
+    }
+    if (!colNames.includes('categories')) {
+      console.log('[db] Adding categories column to clients');
+      await db.exec("ALTER TABLE clients ADD COLUMN categories TEXT;");
     }
   } catch (err) {
     console.error('[db] ensureClientExtraFields error:', err && err.message ? err.message : err);
@@ -257,11 +273,6 @@ export async function ensureRequestsApproverColumn() {
   }
 }
 
-export async function dropLegacyClientAddressColumn() {
-  // No-op placeholder to match server import; dropping columns in SQLite requires table rebuild.
-  console.log('[db] dropLegacyClientAddressColumn: no-op (preserving legacy address column)');
-}
-
 /**
  * Simple query/run wrappers (export to controllers)
  */
@@ -280,7 +291,6 @@ export const dbModule = {
   initDB,
   ensureClientExtraFields,
   ensureRequestsApproverColumn,
-  dropLegacyClientAddressColumn,
   query,
   run
 };
@@ -290,7 +300,6 @@ export default {
   initDB,
   ensureClientExtraFields,
   ensureRequestsApproverColumn,
-  dropLegacyClientAddressColumn,
   query,
   run,
   dbModule,
