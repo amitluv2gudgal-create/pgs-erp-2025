@@ -1,113 +1,119 @@
-// server.js (fixed login 401)
-import express from 'express';
-import cors from 'cors';
-import session from 'express-session';
-import SQLiteStoreFactory from 'connect-sqlite3';
-import bodyParser from 'body-parser';
-import dotenv from 'dotenv';
+// controllers/auth.js
+// ES module controller for authentication (login/logout + middleware)
+// uses bcrypt for password comparison and an in-memory session store for simple testing
+import bcrypt from 'bcrypt';
+import cookie from 'cookie';
+import { query, run } from '../db.js'; // using named exports from db.js
 
-import {
-  dropLegacyClientAddressColumn,
-  ensureRequestsApproverColumn,
-  ensureClientExtraFields,
-  initDB,
-  DB_PATH
-} from './db.js';
+// simple in-memory session store (for testing only)
+// production: replace with Redis or DB-backed session store
+const sessions = new Map();
 
-import authRoutes from './controllers/auth.js';
-import clientsCtrl from './controllers/clients.js';
-import employeeRoutes from './controllers/employees.js';
-import attendanceRoutes from './controllers/attendances.js';
-import deductionRoutes from './controllers/deductions.js';
-import invoiceRoutes from './controllers/invoices.js';
-import salaryRoutes from './controllers/salaries.js';
-import requestRoutes from './controllers/requests.js';
-import securitySupervisorRoutes from './controllers/security_supervisors.js';
+/**
+ * login(req, res)
+ * expects JSON body: { username, password }
+ * sets httpOnly cookie 'sid' on success
+ */
+export async function login(req, res) {
+  try {
+    const body = req.body || {};
+    const username = (body.username || '').toString().trim();
+    const password = (body.password || '').toString();
 
-dotenv.config();
+    if (!username || !password) {
+      return res.status(400).json({ error: 'username and password are required' });
+    }
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-const { SESSION_SECRET, NODE_ENV } = process.env;
+    // find user
+    const rows = await query('SELECT id, username, password, role FROM users WHERE username = ?', [username]);
+    const user = Array.isArray(rows) && rows.length ? rows[0] : null;
 
-if (!SESSION_SECRET) {
-  console.error('Missing SESSION_SECRET environment variable — set it on Render or locally');
-  process.exit(1);
+    if (!user) {
+      // avoid leaking which part is wrong
+      console.warn(`[auth] login failed: unknown username "${username}"`);
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
+
+    const stored = user.password || '';
+
+    let passwordMatches = false;
+    // If stored looks like bcrypt hash, use bcrypt.compare
+    if (typeof stored === 'string' && stored.startsWith('$2')) {
+      passwordMatches = await bcrypt.compare(password, stored);
+    } else {
+      // fallback to plaintext match (not recommended)
+      passwordMatches = password === stored;
+    }
+
+    if (!passwordMatches) {
+      console.warn(`[auth] login failed: wrong password for username "${username}" (id:${user.id})`);
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
+
+    // create session token
+    const sid = 's_' + Date.now().toString(36) + Math.random().toString(36).slice(2,9);
+    const sessionObj = { sid, userId: user.id, username: user.username, role: user.role, createdAt: Date.now() };
+    sessions.set(sid, sessionObj);
+
+    // set cookie options
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 1000 * 60 * 60 * 6 // 6 hours in ms
+    };
+
+    res.cookie('sid', sid, cookieOptions);
+
+    // return minimal user info
+    return res.json({ success: true, user: { id: user.id, username: user.username, role: user.role } });
+  } catch (err) {
+    console.error('[auth.login] unexpected error', err && err.message ? err.message : err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
 }
 
-// Middleware
-app.use(cors({ origin: true, credentials: true }));
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.static('public'));
-app.set('trust proxy', 1);
-
-// Sessions (SQLite)
-const SQLiteStore = SQLiteStoreFactory(session);
-const sessionStore = new SQLiteStore({
-  db: 'sessions.sqlite',
-  dir: './data',
-  concurrentDB: true
-});
-app.use(session({
-  store: sessionStore,
-  secret: SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    maxAge: 24 * 60 * 60 * 1000,
-    secure: NODE_ENV === 'production',
-    sameSite: 'lax'
-  }
-}));
-
-// ---- Mount AUTH routes FIRST (so /api/auth/login is accessible) ----
-app.use('/api/auth', authRoutes);
-
-// Then protect all other /api routes
-const requireAuth = (req, res, next) => {
-  if (req.session?.user) return next();
-  return res.status(401).json({ error: 'Unauthorized' });
-};
-app.use('/api', requireAuth);
-
-// ---- Mount all protected routers ----
-app.use('/api/employees', employeeRoutes);
-app.use('/api/attendances', attendanceRoutes);
-app.use('/api/deductions', deductionRoutes);
-app.use('/api/invoices', invoiceRoutes);
-app.use('/api/salaries', salaryRoutes);
-app.use('/api/requests', requestRoutes);
-app.use('/api/security-supervisors', securitySupervisorRoutes);
-
-// direct client CRUD endpoints
-app.get('/api/clients', clientsCtrl.listClients);
-app.get('/api/clients/:id', clientsCtrl.getClient);
-app.post('/api/clients', clientsCtrl.createClient);
-app.put('/api/clients/:id', clientsCtrl.updateClient);
-app.delete('/api/clients/:id', clientsCtrl.deleteClient);
-app.get('/api/clients/:id/categories', clientsCtrl.listClientCategories);
-app.post('/api/clients/:id/categories', clientsCtrl.addClientCategory);
-app.delete('/api/clients/:id/categories/:catId', clientsCtrl.removeClientCategory);
-
-// Basic pages
-app.get('/', (req, res) => res.redirect('/login.html'));
-app.get('/favicon.ico', (_, res) => res.status(204).end());
-
-// ---- Initialize DB then start server ----
-(async () => {
+/**
+ * logout(req, res)
+ * clears session cookie and removes session from store
+ */
+export async function logout(req, res) {
   try {
-    await initDB();
-    await ensureRequestsApproverColumn();
-    await ensureClientExtraFields();
-    await dropLegacyClientAddressColumn();
-
-    app.listen(PORT, () => {
-      console.log(`✅ PGS-ERP running on port ${PORT} (env: ${NODE_ENV || 'dev'})`);
-      console.log('[db] Ready at:', DB_PATH);
-    });
+    const sid = req.cookies && req.cookies.sid;
+    if (sid) {
+      sessions.delete(sid);
+    }
+    res.clearCookie('sid');
+    return res.json({ success: true });
   } catch (err) {
-    console.error('Fatal startup error:', err);
-    process.exit(1);
+    console.warn('[auth.logout] error', err && err.message ? err.message : err);
+    return res.status(500).json({ error: 'Internal server error' });
   }
-})();
+}
+
+/**
+ * requireAuth middleware
+ * attaches req.user = { id, username, role } when authenticated
+ */
+export async function requireAuth(req, res, next) {
+  try {
+    const sid = req.cookies && req.cookies.sid;
+    if (!sid) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+    const s = sessions.get(sid);
+    if (!s) return res.status(401).json({ error: 'Not authenticated' });
+    req.user = { id: s.userId, username: s.username, role: s.role };
+    return next();
+  } catch (err) {
+    console.error('[auth.requireAuth] error', err && err.message ? err.message : err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+/**
+ * helper to get session (useful for debugging)
+ */
+export function getSession(sid) {
+  return sessions.get(sid);
+}
