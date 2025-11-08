@@ -1,5 +1,6 @@
 // db.js
 // ES module, robust sqlite initialization with safe fallback for Render
+import bcrypt from 'bcrypt';
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
@@ -67,6 +68,17 @@ export async function initDB() {
     });
 
     console.log('[db] opened at', DB_PATH);
+
+        // after migrations:
+    await ensureRequestsApproverColumn();
+    await ensureClientExtraFields();
+    try { await dropLegacyClientAddressColumn() } catch(e){}
+
+    // run seed
+    await seedInitialData();
+
+    console.log('[db] initialization completed');
+
 
     // Core table creations (idempotent)
     await db.exec(`CREATE TABLE IF NOT EXISTS users (
@@ -205,6 +217,55 @@ export async function initDB() {
     // Safe migrations: add missing columns if needed
     await ensureClientExtraFields();
     await ensureRequestsApproverColumn();
+
+
+async function seedInitialData() {
+  if (!db) throw new Error('DB not initialized');
+
+  // 1) Create a default accountant/admin user if no users exist
+  try {
+    const users = await db.all('SELECT id, username FROM users LIMIT 1;');
+    if (!users || users.length === 0) {
+      const passwordPlain = process.env.INIT_ADMIN_PW || 'rohit123'; // change via env if you want
+      const hash = await bcrypt.hash(passwordPlain, 10);
+      await db.run('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', ['accountant', hash, 'accountant']);
+      console.log('[db] seeded default user "accountant"');
+    } else {
+      // ensure a user named 'accountant' exists, create if missing
+      const acc = await db.all("SELECT id FROM users WHERE username = 'accountant' LIMIT 1;");
+      if (!acc || acc.length === 0) {
+        const passwordPlain = process.env.INIT_ADMIN_PW || 'rohit123';
+        const hash = await bcrypt.hash(passwordPlain, 10);
+        await db.run('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', ['accountant', hash, 'accountant']);
+        console.log('[db] ensured user "accountant" exists');
+      }
+    }
+  } catch (err) {
+    console.error('[db] seed user error:', err && err.message ? err.message : err);
+  }
+
+  // 2) Insert a demo client + employee if clients table is empty
+  try {
+    const ccount = await db.all('SELECT COUNT(*) as cnt FROM clients;');
+    const cnt = Array.isArray(ccount) && ccount[0] ? ccount[0].cnt : 0;
+    if (!cnt || Number(cnt) === 0) {
+      await db.run(`INSERT INTO clients (name,address_line1,address_line2,po_dated,state,district,contact_person,telephone,email,gst_number,cgst,sgst,igst,categories)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?);`,
+        ['Demo Client Pvt Ltd', 'House 12, Business Park', 'Site Office', '2025-09-01', 'Maharashtra', 'Mumbai', 'Mr. Rahul', '9876543210', 'demo@client.com', '27ABCDE1234F2Z5', 9, 9, 0, 'Security']);
+      const cidRow = await db.all("SELECT id FROM clients WHERE name = 'Demo Client Pvt Ltd' LIMIT 1;");
+      const cid = cidRow[0] ? cidRow[0].id : null;
+      if (cid) {
+        await db.run(`INSERT INTO employees (name,father_name,local_address,permanent_address,telephone,email,marital_status,next_kin_name,next_kin_telephone,identifier_name,epf_number,esic_number,criminal_record,salary_per_month,category,client_id)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);`,
+          ['Ramesh Kumar','S. Kumar','Near Market','Village Road','9998887777','ramesh@example.com','Married','Sita Devi','9998880000','Aadhar 1234','EPF123','ESIC123','No',12000,'Security Guard', cid ]);
+      }
+      console.log('[db] seeded demo client + employee');
+    }
+  } catch (err) {
+    console.error('[db] seed client/employee error:', err && err.message ? err.message : err);
+  }
+}
+
 
     // Remove legacy columns if present (safe no-op if not present)
     try {
