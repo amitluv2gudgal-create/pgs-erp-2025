@@ -1,0 +1,155 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique
+  password  String
+  role      Role
+  createdAt DateTime @default(now())
+}
+
+enum Role {
+  ADMIN
+  ACCOUNTANT
+  HR
+}
+
+model Client {
+  id            Int              @id @default(autoincrement())
+  name          String
+  address_line1 String?
+  address_line2 String?
+  state         String?
+  district      String?
+  contactPerson String?
+  telephone     String?
+  poNumber      String?
+  po_dated      String?
+  cgstRate      Float            @default(9.0)
+  sgstRate      Float            @default(9.0)
+  igstRate      Float            @default(18.0)
+  categories    ClientCategory[]
+  invoices      Invoice[]
+  employees     Employee[]
+  createdAt     DateTime         @default(now())
+}
+
+model ClientCategory {
+  id           Int    @id @default(autoincrement())
+  client       Client @relation(fields: [clientId], references: [id])
+  clientId     Int
+  name         String
+  ratePerMonth Float
+}
+
+model Supervisor {
+  id        Int      @id @default(autoincrement())
+  name      String
+  phone     String?
+  site      String?
+  createdAt DateTime @default(now())
+}
+
+model Employee {
+  id                   Int      @id @default(autoincrement())
+  name                 String
+  father_name          String?
+  local_address        String?
+  permanent_address    String?
+  telephone            String?
+  email                String?
+  marital_status       String?
+  spouse_name          String?
+  next_kin_name        String?
+  next_kin_telephone   String?
+  next_kin_address     String?
+  identifier_name      String?
+  identifier_address   String?
+  identifier_telephone String?
+  epf_number           String?
+  esic_number          String?
+  criminal_record      String?
+  salary_per_month     Float    @default(0.0)
+  category             String
+  client               Client?  @relation(fields: [clientId], references: [id])
+  clientId             Int?
+  employeeId           String   @unique
+  createdAt            DateTime @default(now())
+
+  attendances Attendance[]
+  salaries    Salary[]
+  deductions  Deduction[]
+}
+
+model Attendance {
+  id          Int       @id @default(autoincrement())
+  employee    Employee  @relation(fields: [employeeId], references: [id])
+  employeeId  Int
+  date        DateTime
+  sessions    Int
+  status      AttStatus @default(PENDING)
+  submittedBy String?
+  createdAt   DateTime  @default(now())
+}
+
+enum AttStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Deduction {
+  id         Int       @id @default(autoincrement())
+  employee   Employee? @relation(fields: [employeeId], references: [id])
+  employeeId Int?
+  name       String
+  amount     Float
+  createdAt  DateTime  @default(now())
+}
+
+model Invoice {
+  id          Int      @id @default(autoincrement())
+  client      Client   @relation(fields: [clientId], references: [id])
+  clientId    Int
+  month       Int
+  year        Int
+  lines       Json
+  totalAmount Float
+  createdAt   DateTime @default(now())
+}
+
+model Salary {
+  id          Int      @id @default(autoincrement())
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  employeeId  Int
+  month       Int
+  year        Int
+  basicAmount Float
+  deductions  Float
+  netPay      Float
+  createdAt   DateTime @default(now())
+}
+
+model EditRequest {
+  id          Int           @id @default(autoincrement())
+  tableName   String
+  rowId       Int
+  action      String
+  requesterId Int
+  payload     Json?
+  status      RequestStatus @default(PENDING)
+  createdAt   DateTime      @default(now())
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}

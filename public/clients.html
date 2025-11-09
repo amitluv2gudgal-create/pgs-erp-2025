@@ -1,0 +1,74 @@
+<!doctype html>
+<input type="text" name="state" />
+</div>
+<div>
+<label>District</label>
+<input type="text" name="district" />
+</div>
+</div>
+
+
+<div class="row">
+<div>
+<label>Contact Person</label>
+<input type="text" name="contactPerson" />
+</div>
+<div>
+<label>Telephone</label>
+<input type="text" name="telephone" />
+</div>
+</div>
+
+
+<h3>Tax Rates</h3>
+<div class="row">
+<div>
+<label>CGST (%)</label>
+<input type="number" name="cgstRate" value="9" />
+</div>
+<div>
+<label>SGST (%)</label>
+<input type="number" name="sgstRate" value="9" />
+</div>
+<div>
+<label>IGST (%)</label>
+<input type="number" name="igstRate" value="18" />
+</div>
+</div>
+
+
+<h3>Categories & Monthly Rate</h3>
+<div id="categoriesArea">
+<div class="row catRow">
+<div>
+<label>Category Name</label>
+<input type="text" name="catName" />
+</div>
+<div>
+<label>Rate / Month (INR)</label>
+<input type="number" name="catRate" step="0.01" />
+</div>
+<div>
+<label>&nbsp;</label>
+<button type="button" class="removeCat secondary">Remove</button>
+</div>
+</div>
+</div>
+<div class="flex">
+<button type="button" id="addCat">Add Category</button>
+<button type="submit">Create Client</button>
+</div>
+</form>
+
+
+<h2>Clients</h2>
+<table class="table" id="clientsTable">
+<thead>
+<tr><th>ID</th><th>Name</th><th>Contact</th><th>Taxes</th><th>Categories</th><th>Actions</th></tr>
+</thead>
+<tbody></tbody>
+</table>
+</div>
+<script src="/js/clients.js"></script>
+</body>
+</html>

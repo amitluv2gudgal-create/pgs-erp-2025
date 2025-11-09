@@ -1,5 +1,4 @@
-// controllers/security_supervisor.js
-import express from 'express';
+﻿import express from 'express';
 import { authMiddleware } from './auth.js';
 const router = express.Router();
 

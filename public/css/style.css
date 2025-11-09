@@ -1,138 +1,18 @@
-/* style.css — updated for responsive wide tables and visible action buttons */
+body { font-family: Arial, sans-serif; margin: 16px; background: #f7f8fb; color: #222; }
+.container { max-width: 1100px; margin: 0 auto; background: #fff; padding: 18px; border-radius: 8px; box-shadow: 0 4px 18px rgba(0,0,0,0.06); }
+h1,h2 { margin: 8px 0 16px; }
+form .row { display:flex; gap:12px; margin-bottom:8px; }
+form .row > div { flex:1; }
+input[type=text], input[type=number], input[type=email], select, textarea { width:100%; padding:8px; border:1px solid #d1d5db; border-radius:4px; }
+button { padding:8px 12px; border:none; background:#0b63d6; color:#fff; border-radius:6px; cursor:pointer; }
+button.secondary { background:#6b7280; }
+.table { width:100%; border-collapse:collapse; margin-top:12px; }
+.table th, .table td { border:1px solid #e5e7eb; padding:8px; text-align:left; font-size:13px; }
+.small { font-size:12px; color:#6b7280; }
+.code { font-family: monospace; background:#f3f4f6; padding:6px; border-radius:4px; }
+.flex { display:flex; gap:8px; }
+.right { text-align:right; }
 
-/* --- Normalize & Box Model --- */
-html, body {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-  height: 100%;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background: #f5f7fa;
-  color: #333;
-}
 
-*, *::before, *::after {
-  box-sizing: inherit;
-}
-
-/* Basic components */
-h1, h2, h3 {
-  color: #2c3e50;
-  margin: 14px 20px;
-}
-
-button {
-  background-color: #3498db;
-  color: white;
-  padding: 8px 12px;
-  margin: 4px;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  transition: 0.15s;
-  font-size: 14px;
-}
-
-button:hover { background-color: #2980b9; }
-
-/* small action buttons used inside table */
-.btn-action {
-  background: #ffffff;
-  color: #333;
-  border: 1px solid #d0d0d0;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-}
-.btn-action:hover { box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
-
-/* Layout sections */
-#logoutBtn {
-  float: right;
-  margin: 16px 20px;
-  background-color: #e74c3c;
-}
-#logoutBtn:hover { background-color: #c0392b; }
-
-#content {
-  margin: 20px;
-  padding: 10px;
-}
-
-/* Table container behavior */
-.table, table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-/* Responsive wrapper that enables horizontal scroll when needed */
-.responsive-table {
-  width: 100%;
-  overflow-x: auto;       /* horizontal scroll */
-  -webkit-overflow-scrolling: touch;
-  padding-bottom: 6px;
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.06);
-  margin-bottom: 18px;
-}
-
-/* tables that are allowed to grow beyond viewport */
-.clients-table, .employees-table, .generic-wide-table {
-  min-width: 1200px;      /* adjust to number of columns */
-  table-layout: auto;     /* let columns size naturally */
-}
-
-/* table header / cells */
-.clients-table th, .clients-table td,
-.employees-table th, .employees-table td,
-.generic-wide-table th, .generic-wide-table td {
-  padding: 10px 12px;
-  border-bottom: 1px solid #eee;
-  white-space: nowrap;    /* each cell content stays on single line - allows horizontal scroll */
-  text-overflow: ellipsis;
-  overflow: hidden;
-  vertical-align: middle;
-}
-
-/* header style */
-.clients-table thead th, .employees-table thead th {
-  background-color: #34495e;
-  color: white;
-  text-align: left;
-  position: sticky;
-  top: 0;
-  z-index: 3;
-}
-
-/* small visual tweaks for mobile */
-@media (max-width: 780px) {
-  .clients-table, .employees-table, .generic-wide-table {
-    min-width: 900px; /* still allow scroll but reduce min for phones */
-  }
-  .clients-table th, .clients-table td { white-space: normal; }
-}
-
-/* action column alignment */
-.action-cell { white-space: nowrap; width: 160px; }
-
-/* subtle card style for forms/content boxes */
-form, #adminSection, #accountantSection, #hrSection {
-  margin: 20px;
-  padding: 14px;
-  background: #ffffff;
-  border-radius: 8px;
-  box-shadow: 0 3px 8px rgba(0,0,0,0.06);
-}
-
-/* small utility */
-.loading { padding: 12px; color: #666; }
-
-/* ensure table-container blocks are available */
-#table-container { margin: 20px; }
-
-/* minimal table row hover */
-.clients-table tbody tr:hover { background: rgba(0,0,0,0.02); }
+/* responsive */
+@media (max-width:900px){ .row { flex-direction:column; } }

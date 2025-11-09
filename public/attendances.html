@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Attendances — PGS-ERP</title>
+<link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+<div class="container">
+<h1>Attendance Submission</h1>
+<p class="small">If submitted by Security Supervisor it will be saved as <strong>Pending</strong> and HR must verify/approve before it is counted for invoices and salaries.</p>
+
+
+<form id="attForm">
+<div class="row">
+<div>
+<label>Employee (select)</label>
+<select name="employeeId" id="employeeSelect"></select>
+</div>
+<div>
+<label>Date</label>
+<input type="date" name="date" required />
+</div>
+<div>
+<label>Sessions (0/1/2)</label>
+<input type="number" name="sessions" min="0" max="2" value="1" required />
+</div>
+</div>
+<div class="flex">
+<button type="submit">Submit Attendance</button>
+<button type="button" id="btnBulk" class="secondary">Bulk Upload (CSV)</button>
+</div>
+</form>
+
+
+<h2>Pending Attendance (Supervisor-submitted)</h2>
+<table class="table" id="pendingTable">
+<thead><tr><th>ID</th><th>Emp</th><th>Date</th><th>Sessions</th><th>Status</th><th>Actions</th></tr></thead>
+<tbody></tbody>
+</table>
+</div>
+<script src="/js/attendances.js"></script>
+</body>
+</html>
