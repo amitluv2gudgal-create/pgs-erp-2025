@@ -36,7 +36,11 @@ app.use("/api/salaries", salariesRouter);
 app.use("/api/requests", requestsRouter);
 app.use("/api/supervisors", supervisorsRouter);
 
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-  console.log(`PGS-ERP server listening on ${PORT}`);
+// server.js (bottom part) - replace your existing app.listen(...) with this block
+
+const port = Number(process.env.PORT || 8080);
+const host = "0.0.0.0";
+
+app.listen(port, host, () => {
+  console.log(`PGS-ERP server listening on ${port} (host ${host})`);
 });
