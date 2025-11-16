@@ -54,14 +54,14 @@ export async function initDB() {
 
   await db.exec('BEGIN TRANSACTION');
   try {
-    // create tables (idempotent)
-    await db.run(`CREATE TABLE IF NOT EXISTS users (
+     await db.run(`CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE,
       password TEXT,
       role TEXT
     )`);
 
+    // clients table with new fields
     await db.run(`CREATE TABLE IF NOT EXISTS clients (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT,
@@ -69,22 +69,66 @@ export async function initDB() {
       address_line2 TEXT,
       state TEXT,
       district TEXT,
+      po_order TEXT,
       telephone TEXT,
-      email TEXT
+      email TEXT,
+      cgst REAL DEFAULT 0,
+      sgst REAL DEFAULT 0,
+      igst REAL DEFAULT 0
     )`);
 
+    // client categories & rates
+    await db.run(`CREATE TABLE IF NOT EXISTS client_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id INTEGER,
+      category TEXT,
+      monthly_rate REAL DEFAULT 0,
+      FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE
+    )`);
+
+    // employees (with photo)
     await db.run(`CREATE TABLE IF NOT EXISTS employees (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT,
+      father_name TEXT,
+      local_address TEXT,
+      permanent_address TEXT,
       telephone TEXT,
       email TEXT,
+      marital_status TEXT,
+      spouse_name TEXT,
+      next_kin_name TEXT,
+      next_kin_telephone TEXT,
+      next_kin_address TEXT,
+      identifier_name TEXT,
+      identifier_address TEXT,
+      identifier_telephone TEXT,
+      epf_number TEXT,
+      esic_number TEXT,
+      criminal_record TEXT,
       salary_per_month REAL,
       category TEXT,
       client_id INTEGER,
+      photo TEXT,
       created_at TEXT DEFAULT (datetime('now','localtime')),
       FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE SET NULL
     )`);
 
+    // security supervisors
+    await db.run(`CREATE TABLE IF NOT EXISTS security_supervisors (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      username TEXT UNIQUE,
+      password TEXT,
+      client_id INTEGER,
+      site_name TEXT,
+      created_by INTEGER,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE SET NULL,
+      FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL
+    )`);
+
+    // attendances
     await db.run(`CREATE TABLE IF NOT EXISTS attendances (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       employee_id INTEGER,
@@ -93,19 +137,122 @@ export async function initDB() {
       submitted_by INTEGER,
       client_id INTEGER,
       status TEXT DEFAULT 'pending',
-      created_at TEXT DEFAULT (datetime('now','localtime'))
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+      FOREIGN KEY(submitted_by) REFERENCES security_supervisors(id) ON DELETE SET NULL,
+      FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE SET NULL
     )`);
 
+    // deductions
+    await db.run(`CREATE TABLE IF NOT EXISTS deductions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      employee_id INTEGER,
+      amount REAL,
+      reason TEXT,
+      date TEXT,
+      month TEXT,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE
+    )`);
+
+    // invoices
     await db.run(`CREATE TABLE IF NOT EXISTS invoices (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       client_id INTEGER,
       month TEXT,
       invoice_no TEXT,
       subtotal REAL,
+      service_charges REAL,
       total REAL,
+      cgst_amount REAL,
+      sgst_amount REAL,
+      grand_total REAL,
       invoice_date TEXT,
-      created_at TEXT DEFAULT (datetime('now','localtime'))
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE
     )`);
+
+    // salaries
+    await db.run(`CREATE TABLE IF NOT EXISTS salaries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      employee_id INTEGER,
+      month TEXT,
+      attendance_days INTEGER,
+      amount REAL,
+      deductions REAL,
+      net_amount REAL,
+      salary_date TEXT,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      FOREIGN KEY(employee_id) REFERENCES employees(id) ON DELETE CASCADE
+    )`);
+
+    // requests (approval workflow)
+    await db.run(`CREATE TABLE IF NOT EXISTS requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      requester_id INTEGER,
+      action TEXT,
+      table_name TEXT,
+      record_id INTEGER,
+      data TEXT,
+      new_data TEXT,
+      status TEXT DEFAULT 'pending',
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      FOREIGN KEY(requester_id) REFERENCES users(id) ON DELETE SET NULL
+    )`);
+
+
+    // create tables (idempotent)
+    // await db.run(`CREATE TABLE IF NOT EXISTS users (
+    //   id INTEGER PRIMARY KEY AUTOINCREMENT,
+    //   username TEXT UNIQUE,
+    //   password TEXT,
+    //   role TEXT
+    // )`);
+
+    // await db.run(`CREATE TABLE IF NOT EXISTS clients (
+    //   id INTEGER PRIMARY KEY AUTOINCREMENT,
+    //   name TEXT,
+    //   address_line1 TEXT,
+    //   address_line2 TEXT,
+    //   state TEXT,
+    //   district TEXT,
+    //   telephone TEXT,
+    //   email TEXT
+    // )`);
+
+    // await db.run(`CREATE TABLE IF NOT EXISTS employees (
+    //   id INTEGER PRIMARY KEY AUTOINCREMENT,
+    //   name TEXT,
+    //   telephone TEXT,
+    //   email TEXT,
+    //   salary_per_month REAL,
+    //   category TEXT,
+    //   client_id INTEGER,
+    //   created_at TEXT DEFAULT (datetime('now','localtime')),
+    //   FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE SET NULL
+    // )`);
+
+    // await db.run(`CREATE TABLE IF NOT EXISTS attendances (
+    //   id INTEGER PRIMARY KEY AUTOINCREMENT,
+    //   employee_id INTEGER,
+    //   date TEXT,
+    //   present INTEGER DEFAULT 0,
+    //   submitted_by INTEGER,
+    //   client_id INTEGER,
+    //   status TEXT DEFAULT 'pending',
+    //   created_at TEXT DEFAULT (datetime('now','localtime'))
+    // )`);
+
+    // await db.run(`CREATE TABLE IF NOT EXISTS invoices (
+    //   id INTEGER PRIMARY KEY AUTOINCREMENT,
+    //   client_id INTEGER,
+    //   month TEXT,
+    //   invoice_no TEXT,
+    //   subtotal REAL,
+    //   total REAL,
+    //   invoice_date TEXT,
+    //   created_at TEXT DEFAULT (datetime('now','localtime'))
+    // )`);
 
     await db.exec('COMMIT');
   } catch (err) {
