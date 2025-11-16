@@ -1,53 +1,83 @@
-// controllers/security_supervisor.js
+// controllers/security_supervisors.js
 import express from 'express';
-import { authMiddleware } from './auth.js';
+import { query, run } from '../db.js';
+import { hash } from 'bcrypt';
+
 const router = express.Router();
 
-// List supervisors (all roles can view)
-router.get('/', authMiddleware(['ADMIN','ACCOUNTANT','HR']), async (req, res) => {
+router.post('/create', async (req, res) => {
+  if (!req.session?.user || req.session.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const { name, username, password: providedPassword, client_id, site_name } = req.body;
+  if (!name || !username || !client_id || !site_name) {
+    return res.status(400).json({ error: 'Name, username, client ID, and site name are required' });
+  }
+  const password = providedPassword || 'defaultpassword';
+  const hashedPassword = await hash(password, 10);
+  const { id: creatorId } = req.session.user;
   try {
-    const supervisors = await req.prisma.supervisor.findMany({ orderBy: { id: 'asc' }});
-    res.json(supervisors);
+    const { lastID } = await run(
+      'INSERT INTO security_supervisors (name, username, password, client_id, site_name, created_by) VALUES (?, ?, ?, ?, ?, ?)',
+      [name, username, hashedPassword, client_id, site_name, creatorId]
+    );
+    console.log(`Supervisor created with ID: ${lastID}`);
+    res.json({ id: lastID, name, username, client_id, site_name });
   } catch (err) {
-    console.error('List supervisors error:', err);
-    res.status(500).json({ error: 'Failed to list supervisors' });
+    console.error('Insert error:', err.message);
+    res.status(500).json({ error: 'Database error during creation' });
   }
 });
 
-// Create supervisor (ADMIN)
-router.post('/', authMiddleware(['ADMIN']), async (req, res) => {
+router.put('/edit/:id', async (req, res) => {
+  if (!req.session?.user || req.session.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const { id } = req.params;
+  const { name, site_name, client_id } = req.body;
+  if (!name || !site_name || !client_id) {
+    return res.status(400).json({ error: 'Name, site name, and client ID are required' });
+  }
   try {
-    const { name, phone, site } = req.body;
-    const sup = await req.prisma.supervisor.create({ data: { name, phone: phone || null, site: site || null }});
-    res.json(sup);
+    await run('UPDATE security_supervisors SET name = ?, site_name = ?, client_id = ? WHERE id = ?', [name, site_name, client_id, id]);
+    console.log(`Supervisor ${id} updated`);
+    res.json({ message: 'Supervisor updated' });
   } catch (err) {
-    console.error('Create supervisor error:', err);
-    res.status(500).json({ error: 'Failed to create supervisor' });
+    console.error('Update error:', err.message);
+    res.status(500).json({ error: 'Database error during update' });
   }
 });
 
-// Update supervisor (ADMIN)
-router.put('/:id', authMiddleware(['ADMIN']), async (req, res) => {
+router.delete('/delete/:id', async (req, res) => {
+  if (!req.session?.user || req.session.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const { id } = req.params;
   try {
-    const id = parseInt(req.params.id);
-    const { name, phone, site } = req.body;
-    const updated = await req.prisma.supervisor.update({ where: { id }, data: { name, phone, site }});
-    res.json(updated);
+    await run('DELETE FROM security_supervisors WHERE id = ?', [id]);
+    console.log(`Supervisor ${id} deleted`);
+    res.json({ message: 'Supervisor deleted' });
   } catch (err) {
-    console.error('Update supervisor error:', err);
-    res.status(500).json({ error: 'Failed to update supervisor' });
+    console.error('Delete error:', err.message);
+    res.status(500).json({ error: 'Database error during deletion' });
   }
 });
 
-// Delete supervisor (ADMIN)
-router.delete('/:id', authMiddleware(['ADMIN']), async (req, res) => {
+router.get('/', async (req, res) => {
+  if (!req.session?.user || req.session.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
   try {
-    const id = parseInt(req.params.id);
-    await req.prisma.supervisor.delete({ where: { id }});
-    res.json({ ok: true });
+    const supervisors = await query(`
+      SELECT s.id, s.name, s.username, s.client_id, c.name AS client_name, s.site_name, s.password 
+      FROM security_supervisors s
+      LEFT JOIN clients c ON s.client_id = c.id
+    `);
+    console.log('Fetched supervisors:', supervisors);
+    res.json(supervisors.map(sup => ({ ...sup, password: '******' })));
   } catch (err) {
-    console.error('Delete supervisor error:', err);
-    res.status(500).json({ error: 'Failed to delete supervisor' });
+    console.error('Query error:', err.message);
+    res.status(500).json({ error: 'Database error during fetch' });
   }
 });
 

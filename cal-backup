@@ -1,0 +1,5 @@
+[33m7c70265[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m, [m[1;31morigin/master[m[33m, [m[1;31morigin/HEAD[m[33m)[m Resolve merge conflicts: keep local versions; untrack DB files; update .gitignore
+[33me2833ae[m[33m ([m[1;32mbackup-before-pull[m[33m)[m Initial
+[33m5a90259[m New Buildup
+[33m4b597ec[m Stable working build: PGS-ERP backend + PostgreSQL + supervisor module
+[33m7adc138[m Table Issue

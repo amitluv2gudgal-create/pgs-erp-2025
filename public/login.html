@@ -1,36 +1,17 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>PGS-ERP - Login</title>
+  <meta charset="UTF-8">
+  <title>PGS ERP Login</title>
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <h2>Login</h2>
+  <h1>Login</h1>
   <form id="loginForm">
-    <input name="username" placeholder="username" required /><br/>
-    <input name="password" placeholder="password" type="password" required /><br/>
+    <label>Username: <input type="text" id="username"></label><br>
+    <label>Password: <input type="password" id="password"></label><br>
     <button type="submit">Login</button>
   </form>
-  <script>
-    const form = document.getElementById('loginForm');
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const fd = new FormData(form);
-      const payload = { username: fd.get('username'), password: fd.get('password') };
-      const r = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await r.json();
-      if (r.ok) {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('role', data.role);
-        window.location.href = '/index.html';
-      } else {
-        alert(data.error || 'Login failed');
-      }
-    });
-  </script>
+  <script type="module" src="js/auth.js"></script>
 </body>
 </html>

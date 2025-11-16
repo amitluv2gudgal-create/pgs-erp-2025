@@ -1,144 +1,311 @@
-// controllers/attendances.js
-import express from "express";
-import { authMiddleware } from "./auth.js";
+// PGS-ERP/controllers/attendances.js
+import express from 'express';
+import { query, run } from '../db.js';
+
 const router = express.Router();
 
-// Create attendance
-// - If body.submittedBy === 'supervisor' or role not HR/ADMIN, mark PENDING.
-// - If created by HR or ADMIN, mark APPROVED.
-router.post("/", authMiddleware(["ADMIN","ACCOUNTANT","HR"]), async (req, res) => {
-  try {
-    const prisma = req.prisma;
-    const { employeeId, date, sessions, submittedBy } = req.body;
-    const parsedDate = new Date(date);
-    let status = "APPROVED";
+// Block supervisors from viewing attendance data via GET
+router.use((req, res, next) => {
+  const role = req.session?.user?.role;
+  if (role === 'security_supervisor' && req.method === 'GET') {
+    return res.status(403).json({ error: 'Forbidden: supervisors cannot view attendance data' });
+  }
+  next();
+});
 
-    if (submittedBy && String(submittedBy).toLowerCase() === "supervisor") {
-      status = "PENDING";
-    } else {
-      if (req.user.role === "HR" || req.user.role === "ADMIN") status = "APPROVED";
-      else status = "PENDING";
+/** List attendances (with employee name) */
+router.get('/', async (req, res) => {
+  try {
+    const rows = await query(`
+      SELECT a.*, e.name AS employee_name
+      FROM attendances a
+      LEFT JOIN employees e ON e.id = a.employee_id
+      ORDER BY a.date DESC, a.id DESC
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error('GET /attendances error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Get a single attendance by id (HR/Admin/Accountant can use) */
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const rows = await query(`
+      SELECT a.*, e.name AS employee_name
+      FROM attendances a
+      LEFT JOIN employees e ON e.id = a.employee_id
+      WHERE a.id = ?
+    `, [id]);
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('GET /attendances/:id error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** HR creates attendance -> auto-verified (not pending) */
+router.post('/', async (req, res) => {
+  try {
+    if (!req.session?.user || req.session.user.role !== 'hr') {
+      return res.status(403).json({ error: 'Forbidden: only HR can submit this form' });
     }
 
-    const att = await prisma.attendance.create({
-      data: {
-        employeeId: parseInt(employeeId),
-        date: parsedDate,
-        sessions: parseInt(sessions || 0),
-        status,
-        submittedBy: submittedBy || null
+    const { employee_id, date, present, client_id } = req.body;
+    if (!employee_id || !date || present === undefined) {
+      return res.status(400).json({ error: 'Missing required: employee_id, date, present' });
+    }
+    const p = Number(present);
+    if (![0,1,2].includes(p)) {
+      return res.status(400).json({ error: 'present must be 0, 1, or 2' });
+    }
+
+    const submitted_by = 'hr';
+    const status = 'verified'; // HR submissions are verified immediately
+
+    const result = await run(
+      `INSERT INTO attendances (employee_id, date, present, client_id, submitted_by, status)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [employee_id, date, p, client_id || null, submitted_by, status]
+    );
+
+    res.json({ message: 'Attendance created (verified)', id: result?.lastID ?? result?.insertId });
+  } catch (err) {
+    console.error('POST /attendances error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Supervisor creates attendance -> pending */
+router.post('/supervisor', async (req, res) => {
+  try {
+    if (!req.session?.user || req.session.user.role !== 'security_supervisor') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    let { employee_id, date, present, client_id } = req.body;
+    if (!employee_id || !date || present === undefined) {
+      return res.status(400).json({ error: 'Missing required: employee_id, date, present' });
+    }
+    const p = Number(present);
+    if (![0,1,2].includes(p)) {
+      return res.status(400).json({ error: 'present must be 0, 1, or 2' });
+    }
+
+    const submitted_by = 'supervisor';
+    const status = 'pending'; // supervisors default to pending
+
+    const result = await run(
+      `INSERT INTO attendances (employee_id, date, present, client_id, submitted_by, status)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [employee_id, date, p, client_id || null, submitted_by, status]
+    );
+
+    res.json({ id: result?.lastID ?? result?.insertId, message: 'Attendance submitted for HR verification' });
+  } catch (err) {
+    console.error('POST /attendances/supervisor error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** HR: update (edit) an attendance */
+router.put('/:id', async (req, res) => {
+  try {
+    if (!req.session?.user || req.session.user.role !== 'hr') {
+      return res.status(403).json({ error: 'Forbidden: HR only' });
+    }
+    const { id } = req.params;
+    const { employee_id, date, present, client_id, status } = req.body;
+
+    // Basic validation: allow updating these fields; present must be 0/1/2 if provided
+    if (present !== undefined) {
+      const p = Number(present);
+      if (![0,1,2].includes(p)) {
+        return res.status(400).json({ error: 'present must be 0, 1, or 2' });
       }
-    });
-    res.json(att);
-  } catch (err) {
-    console.error("Create attendance error:", err);
-    res.status(500).json({ error: "Failed to create attendance" });
-  }
-});
-
-// Bulk upload endpoint (array of attendance rows)
-router.post("/batch", authMiddleware(["ADMIN","ACCOUNTANT","HR"]), async (req, res) => {
-  try {
-    const prisma = req.prisma;
-    const arr = req.body; // [{employeeId, date, sessions, submittedBy?}, ...]
-    const created = [];
-    for (const row of arr) {
-      let status = "APPROVED";
-      if (row.submittedBy && String(row.submittedBy).toLowerCase() === "supervisor") status = "PENDING";
-      else if (req.user.role === "HR" || req.user.role === "ADMIN") status = "APPROVED";
-      else status = "PENDING";
-
-      const c = await prisma.attendance.create({
-        data: {
-          employeeId: parseInt(row.employeeId),
-          date: new Date(row.date),
-          sessions: parseInt(row.sessions || 0),
-          status,
-          submittedBy: row.submittedBy || null
-        }
-      });
-      created.push(c);
     }
-    res.json(created);
+
+    // Build dynamic update
+    const fields = [];
+    const values = [];
+    if (employee_id !== undefined) { fields.push('employee_id = ?'); values.push(employee_id); }
+    if (date !== undefined)        { fields.push('date = ?');        values.push(date); }
+    if (present !== undefined)     { fields.push('present = ?');     values.push(Number(present)); }
+    if (client_id !== undefined)   { fields.push('client_id = ?');   values.push(client_id || null); }
+    if (status !== undefined)      { fields.push('status = ?');      values.push(status); }
+
+    if (!fields.length) return res.status(400).json({ error: 'No fields to update' });
+
+    values.push(id);
+    await run(`UPDATE attendances SET ${fields.join(', ')} WHERE id = ?`, values);
+
+    const rows = await query('SELECT * FROM attendances WHERE id = ?', [id]);
+    res.json({ message: 'Updated', attendance: rows[0] });
   } catch (err) {
-    console.error("Batch attendance error:", err);
-    res.status(500).json({ error: "Failed to batch upload attendances" });
+    console.error('PUT /attendances/:id error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// List attendances (optionally filter by status)
-router.get("/", authMiddleware(["ADMIN","ACCOUNTANT","HR"]), async (req, res) => {
+/** HR: delete an attendance */
+router.delete('/:id', async (req, res) => {
   try {
-    const prisma = req.prisma;
-    const { status } = req.query;
-    const where = {};
-    if (status) where.status = status;
-    const items = await prisma.attendance.findMany({
-      where,
-      include: { employee: true },
-      orderBy: { date: 'asc' }
-    });
-    res.json(items);
+    if (!req.session?.user || req.session.user.role !== 'hr') {
+      return res.status(403).json({ error: 'Forbidden: HR only' });
+    }
+    const { id } = req.params;
+    await run('DELETE FROM attendances WHERE id = ?', [id]);
+    res.json({ message: 'Deleted' });
   } catch (err) {
-    console.error("List attendance error:", err);
-    res.status(500).json({ error: "Failed to list attendances" });
+    console.error('DELETE /attendances/:id error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// HR or ADMIN approve a pending attendance
-router.post("/:id/approve", authMiddleware(["HR","ADMIN"]), async (req, res) => {
+/** HR: approve a pending attendance -> verified */
+router.post('/:id/approve', async (req, res) => {
   try {
-    const prisma = req.prisma;
-    const id = parseInt(req.params.id);
-    const att = await prisma.attendance.update({ where: { id }, data: { status: "APPROVED" }});
-    res.json({ ok: true, attendance: att });
+    if (!req.session?.user || req.session.user.role !== 'hr') {
+      return res.status(403).json({ error: 'Forbidden: HR only' });
+    }
+    const { id } = req.params;
+    await run(`UPDATE attendances SET status = 'verified' WHERE id = ? AND status = 'pending'`, [id]);
+    res.json({ message: 'Attendance verified' });
   } catch (err) {
-    console.error("Approve attendance error:", err);
-    res.status(500).json({ error: "Failed to approve attendance" });
+    console.error('POST /attendances/:id/approve error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// HR or ADMIN reject
-router.post("/:id/reject", authMiddleware(["HR","ADMIN"]), async (req, res) => {
+/** HR: reject a pending attendance -> rejected */
+router.post('/:id/reject', async (req, res) => {
   try {
-    const prisma = req.prisma;
-    const id = parseInt(req.params.id);
-    const att = await prisma.attendance.update({ where: { id }, data: { status: "REJECTED" }});
-    res.json({ ok: true, attendance: att });
+    if (!req.session?.user || req.session.user.role !== 'hr') {
+      return res.status(403).json({ error: 'Forbidden: HR only' });
+    }
+    const { id } = req.params;
+    await run(`UPDATE attendances SET status = 'rejected' WHERE id = ? AND status = 'pending'`, [id]);
+    res.json({ message: 'Attendance rejected' });
   } catch (err) {
-    console.error("Reject attendance error:", err);
-    res.status(500).json({ error: "Failed to reject attendance" });
+    console.error('POST /attendances/:id/reject error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// HR submits edit-request for attendance (keeps your existing approval flow)
-router.put("/:id", authMiddleware(["HR"]), async (req, res) => {
+// ==== GET one attendance by ID (for edit modal) ====
+router.get('/:id', async (req, res) => {
   try {
-    const prisma = req.prisma;
-    const id = parseInt(req.params.id);
-    const payload = req.body;
-    const request = await prisma.editRequest.create({
-      data: { tableName: "Attendance", rowId: id, action: "EDIT", requesterId: req.user.id, payload }
-    });
-    res.json({ message: "Edit request submitted", request });
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+
+    const rows = await query('SELECT * FROM attendances WHERE id = ?', [id]);
+    if (!rows.length) return res.status(404).json({ error: 'Attendance not found' });
+    res.json(rows[0]);
   } catch (err) {
-    console.error("Attendance edit request error:", err);
-    res.status(500).json({ error: "Failed to submit edit request" });
+    console.error('GET /attendances/:id error:', err);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
-// HR submits delete-request for attendance
-router.delete("/:id", authMiddleware(["HR"]), async (req, res) => {
+// ==== UPDATE one attendance (PUT) ====
+// Allowed: HR only (and admin if you wish; uncomment to include admin)
+router.put('/:id', async (req, res) => {
   try {
-    const prisma = req.prisma;
-    const id = parseInt(req.params.id);
-    const request = await prisma.editRequest.create({
-      data: { tableName: "Attendance", rowId: id, action: "DELETE", requesterId: req.user.id }
-    });
-    res.json({ message: "Delete request submitted", request });
+    const role = req.session?.user?.role;
+    if (!role) return res.status(401).json({ error: 'Unauthorized' });
+    if (!['hr', 'admin'].includes(role)) return res.status(403).json({ error: 'Forbidden' });
+
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+
+    const rows = await query('SELECT * FROM attendances WHERE id = ?', [id]);
+    if (!rows.length) return res.status(404).json({ error: 'Attendance not found' });
+    const cur = rows[0];
+
+    const {
+      employee_id = cur.employee_id,
+      client_id = cur.client_id,
+      date = cur.date,
+      present = cur.present
+      // status remains via approve/reject endpoints
+    } = (req.body || {});
+
+    await run(
+      `UPDATE attendances
+          SET employee_id=?, client_id=?, date=?, present=?
+        WHERE id=?`,
+      [employee_id, client_id, date, present, id]
+    );
+
+    res.json({ ok: true, message: 'Attendance updated' });
   } catch (err) {
-    console.error("Attendance delete request error:", err);
-    res.status(500).json({ error: "Failed to submit delete request" });
+    console.error('PUT /attendances/:id error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ==== APPROVE ====
+router.post('/:id/approve', async (req, res) => {
+  try {
+    const role = req.session?.user?.role;
+    if (!role) return res.status(401).json({ error: 'Unauthorized' });
+    if (role !== 'hr') return res.status(403).json({ error: 'Forbidden' });
+
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+
+    const rows = await query('SELECT id FROM attendances WHERE id=?', [id]);
+    if (!rows.length) return res.status(404).json({ error: 'Attendance not found' });
+
+    await run('UPDATE attendances SET status=? WHERE id=?', ['approved', id]);
+    res.json({ ok: true, message: 'Attendance approved' });
+  } catch (err) {
+    console.error('POST /attendances/:id/approve error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ==== REJECT ====
+router.post('/:id/reject', async (req, res) => {
+  try {
+    const role = req.session?.user?.role;
+    if (!role) return res.status(401).json({ error: 'Unauthorized' });
+    if (role !== 'hr') return res.status(403).json({ error: 'Forbidden' });
+
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+
+    const rows = await query('SELECT id FROM attendances WHERE id=?', [id]);
+    if (!rows.length) return res.status(404).json({ error: 'Attendance not found' });
+
+    await run('UPDATE attendances SET status=? WHERE id=?', ['rejected', id]);
+    res.json({ ok: true, message: 'Attendance rejected' });
+  } catch (err) {
+    console.error('POST /attendances/:id/reject error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ==== DELETE (optional, used by your UI) ====
+router.delete('/:id', async (req, res) => {
+  try {
+    const role = req.session?.user?.role;
+    if (!role) return res.status(401).json({ error: 'Unauthorized' });
+    if (!['hr', 'admin'].includes(role)) return res.status(403).json({ error: 'Forbidden' });
+
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid ID' });
+
+    const rows = await query('SELECT id FROM attendances WHERE id=?', [id]);
+    if (!rows.length) return res.status(404).json({ error: 'Attendance not found' });
+
+    await run('DELETE FROM attendances WHERE id=?', [id]);
+    res.json({ ok: true, message: 'Attendance deleted' });
+  } catch (err) {
+    console.error('DELETE /attendances/:id error:', err);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 

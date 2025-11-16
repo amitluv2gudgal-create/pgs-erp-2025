@@ -1,67 +1,95 @@
-import express from "express";
-import { authMiddleware } from "./auth.js";
+// PGS-ERP/controllers/requests.js
+import express from 'express';
+import { query, run } from '../db.js';
+
 const router = express.Router();
 
-// List requests (admin)
-router.get("/", authMiddleware(["ADMIN","ACCOUNTANT","HR"]), async (req, res) => {
-  const prisma = req.prisma;
-  if (req.user.role === "ADMIN") {
-    const all = await prisma.editRequest.findMany();
-    return res.json(all);
-  } else {
-    const userRequests = await prisma.editRequest.findMany({ where: { requesterId: req.user.id }});
-    return res.json(userRequests);
-  }
-});
-
-// Admin approves
-router.post("/:id/approve", authMiddleware(["ADMIN"]), async (req, res) => {
-  const prisma = req.prisma;
-  const { id } = req.params;
-  const request = await prisma.editRequest.findUnique({ where: { id: parseInt(id) }});
-  if (!request) return res.status(404).json({ error: "Request not found" });
-
-  if (request.action === "DELETE") {
-    // perform delete on the target table
-    const table = request.tableName;
-    const rowId = request.rowId;
-    await applyDelete(prisma, table, rowId);
-  } else if (request.action === "EDIT") {
-    await applyEdit(prisma, request.tableName, request.rowId, request.payload);
-  }
-  await prisma.editRequest.update({ where: { id: parseInt(id) }, data: { status: "APPROVED" }});
-  res.json({ ok: true });
-});
-
-// Admin rejects
-router.post("/:id/reject", authMiddleware(["ADMIN"]), async (req, res) => {
-  const prisma = req.prisma;
-  const { id } = req.params;
-  await prisma.editRequest.update({ where: { id: parseInt(id) }, data: { status: "REJECTED" }});
-  res.json({ ok: true });
-});
-
-// helper functions
-async function applyDelete(prisma, table, rowId) {
-  const id = parseInt(rowId);
-  switch (table) {
-    case "Client": await prisma.client.delete({ where: { id } }); break;
-    case "Employee": await prisma.employee.delete({ where: { id } }); break;
-    case "Attendance": await prisma.attendance.delete({ where: { id } }); break;
-    case "Invoice": await prisma.invoice.delete({ where: { id } }); break;
-    case "Salary": await prisma.salary.delete({ where: { id } }); break;
-    default: throw new Error("Unsupported delete");
+// Create request (internal function)
+export async function createRequest(requester_id, action, table_name, record_id, new_data) {
+  try {
+    await run(
+      'INSERT INTO requests (requester_id, action, table_name, record_id, data, new_data, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [requester_id, action, table_name, record_id, null, new_data || null, 'pending']
+    );
+  } catch (err) {
+    console.error('Error creating request:', err);
+    throw err;
   }
 }
 
-async function applyEdit(prisma, table, rowId, payload) {
-  const id = parseInt(rowId);
-  switch (table) {
-    case "Client": await prisma.client.update({ where: { id }, data: payload }); break;
-    case "Employee": await prisma.employee.update({ where: { id }, data: payload }); break;
-    case "Attendance": await prisma.attendance.update({ where: { id }, data: payload }); break;
-    default: throw new Error("Unsupported edit");
+// POST route to create a new request (for edit/delete from frontend)
+router.post('/', async (req, res) => {
+  if (!['accountant', 'hr'].includes(req.session.user.role)) return res.status(403).json({ error: 'Forbidden' });
+  const { action, table_name, record_id, data } = req.body;
+  try {
+    if (!action || !table_name || !record_id) {
+      throw new Error('Missing required parameters: action, table_name, record_id');
+    }
+    await createRequest(req.session.user.id, action, table_name, record_id, data);
+    res.json({ message: 'Request created successfully. Awaiting admin approval.' });
+  } catch (err) {
+    console.error('Error creating request:', err);
+    res.status(500).json({ error: err.message });
   }
-}
+});
+
+// Get pending requests (admin only)
+router.get('/pending', async (req, res) => {
+  if (req.session.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  try {
+    const requests = await query('SELECT * FROM requests WHERE status = "pending"');
+    res.json(requests);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Verify Attendance
+router.post('/verify-attendance/:id', async (req, res) => {
+  if (!req.session?.user || req.session.user.role !== 'hr') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const { id } = req.params;
+  await run('UPDATE attendances SET status = ? WHERE id = ? AND status = ?', ['verified', id, 'pending']);
+  res.json({ message: 'Attendance verified' });
+});
+
+// Approve request (admin)
+router.post('/approve/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const request = await query('SELECT * FROM requests WHERE id = ? AND status = ?', [id, 'pending']);
+    if (!request.length) return res.status(404).json({ error: 'Request not found or already processed' });
+
+    const { table_name, record_id, new_data } = request[0];
+    if (new_data) {
+      // Handle edit request
+      const updateData = JSON.parse(new_data);
+      const setClauses = Object.keys(updateData).map(key => `${key} = ?`).join(', ');
+      const values = [...Object.values(updateData), record_id];
+      await run(`UPDATE ${table_name} SET ${setClauses} WHERE id = ?`, values);
+    } else if (request[0].action === 'delete') {
+      // Handle delete request
+      await run(`DELETE FROM ${table_name} WHERE id = ?`, [record_id]);
+    }
+    await run('UPDATE requests SET status = ? WHERE id = ?', ['approved', id]);
+    res.json({ success: true, message: 'Request approved' });
+  } catch (err) {
+    console.error('Error approving request:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Reject request (admin)
+router.post('/reject/:id', async (req, res) => {
+  if (req.session.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  try {
+    await run('UPDATE requests SET status = ?, approver_id = ? WHERE id = ?', ['rejected', req.session.user.id, req.params.id]);
+    res.json({ success: true, message: 'Request rejected' });
+  } catch (err) {
+    console.error('Error rejecting request:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 export default router;
