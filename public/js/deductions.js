@@ -36,106 +36,175 @@ function escapeHTML(s) {
     .replaceAll("'", '&#39;');
 }
 
+// Robust populateEmployeeDropdown: uses /api/employees and falls back to loadEmployees() if defined
 async function populateEmployeeDropdown(selectId) {
   const sel = document.getElementById(selectId);
   if (!sel) return;
   try {
-    const emps = (typeof loadEmployees === 'function') ? await loadEmployees() : [];
+    // Try direct fetch first (ensures credentials are sent)
+    let emps = [];
+    try {
+      const resp = await fetch('/api/employees', { credentials: 'include' });
+      if (resp.ok) {
+        emps = await resp.json();
+      } else {
+        // fallback to loadEmployees if available
+        if (typeof loadEmployees === 'function') {
+          emps = await loadEmployees();
+        } else {
+          emps = [];
+        }
+      }
+    } catch (e) {
+      // fetch failed, try loadEmployees global if present
+      if (typeof loadEmployees === 'function') {
+        try { emps = await loadEmployees(); } catch(_) { emps = []; }
+      } else {
+        emps = [];
+      }
+    }
+
     if (!Array.isArray(emps) || emps.length === 0) {
       sel.innerHTML = '<option value="">No employees available</option>';
+      sel.disabled = true;
       return;
     }
-    sel.innerHTML = ['<option value="">Select Employee</option>']
-      .concat(emps.map(e => `<option value="${e.id}">${escapeHTML(e.name || `ID ${e.id}`)} (ID: ${e.id})</option>`))
-      .join('');
-  } catch (e) {
-    console.error('populateEmployeeDropdown error:', e);
+
+    sel.disabled = false;
+    sel.innerHTML = '<option value="">Select Employee</option>' +
+      emps.map(e => {
+        // adapt to common shapes: prefer name, employee_id or id
+        const id = e.id ?? e.employee_id ?? '';
+        const name = e.name ?? e.full_name ?? e.employee_name ?? (`ID ${id}`);
+        return `<option value="${id}">${escapeHTML(name)} (ID: ${id})</option>`;
+      }).join('');
+  } catch (err) {
+    console.error('populateEmployeeDropdown error:', err);
     sel.innerHTML = '<option value="">Failed to load employees</option>';
+    sel.disabled = true;
   }
 }
 
+// Floating modal Create Deduction form (replace existing window.showDeductionForm)
 window.showDeductionForm = async () => {
-  // Hide open tables/forms
-  document.querySelectorAll('[id^="table-container-"]').forEach(d => d.style.display = 'none');
-  document.querySelectorAll('[id^="form-container-"]').forEach(d => d.style.display = 'none');
+  // Helper fetch that includes cookies
+  const fetchAuth = (url, opts = {}) => fetch(url, { credentials: 'include', ...opts });
 
-  // Ensure form container
-  const containerId = 'form-container-deduction';
-  let container = document.getElementById(containerId);
-  if (!container) {
-    container = document.createElement('div');
-    container.id = containerId;
-    document.getElementById('content').appendChild(container);
-  }
-  container.style.display = 'block';
+  // Create overlay + modal
+  const overlay = document.createElement('div');
+  overlay.id = 'deductionModalOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;z-index:9999;';
 
-  container.innerHTML = `
-    <h3>Create Deduction</h3>
-    <form id="deductionForm" autocomplete="off">
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#fff;width:560px;max-width:96%;padding:18px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);max-height:85vh;overflow:auto;';
+  modal.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h3 style="margin:0">Create Deduction</h3>
+      <button id="deductionModalCloseBtn" style="font-size:22px;border:none;background:transparent;cursor:pointer">&times;</button>
+    </div>
+
+    <form id="deductionFormModal" style="display:grid;grid-template-columns:1fr;gap:10px;">
       <label>Employee (required):<br>
-        <select id="ded_employee_id" required>
-          <option value="">Loading employees...</option>
+        <select id="ded_employee_id_modal" required style="width:100%;padding:8px;">
+          <option>Loading employees...</option>
         </select>
-      </label><br><br>
+      </label>
 
       <label>Month (YYYY-MM, required):<br>
-        <input type="month" id="ded_month" required>
-      </label><br><br>
+        <input type="month" id="ded_month_modal" required style="width:100%;padding:8px;">
+      </label>
 
       <label>Reason (required):<br>
-        <select id="ded_reason" required>
+        <select id="ded_reason_modal" required style="width:100%;padding:8px;">
           <option value="">Select</option>
           <option value="Fine">Fine</option>
           <option value="Uniform">Uniform</option>
           <option value="Other">Other</option>
         </select>
-      </label><br><br>
+      </label>
 
       <label>Amount (₹, required):<br>
-        <input type="number" id="ded_amount" min="0" step="1" required>
-      </label><br><br>
+        <input type="number" id="ded_amount_modal" min="0" step="0.01" required style="width:100%;padding:8px;">
+      </label>
 
       <label>Note (optional):<br>
-        <input type="text" id="ded_note" placeholder="Optional remarks">
-      </label><br><br>
+        <input type="text" id="ded_note_modal" placeholder="Optional remarks" style="width:100%;padding:8px;">
+      </label>
 
-      <div style="display:flex;gap:8px;">
-        <button type="submit" id="ded_submit">Save</button>
-        <button type="button" id="ded_reset">Reset</button>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px;">
+        <button type="button" id="ded_reset_modal" style="padding:8px 12px;">Reset</button>
+        <button type="button" id="ded_cancel_modal" style="padding:8px 12px;">Cancel</button>
+        <button type="submit" id="ded_submit_modal" style="background:#007bff;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer">Save</button>
       </div>
     </form>
   `;
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
 
-  await populateEmployeeDropdown('ded_employee_id');
+  // close handlers
+  const closeOverlay = () => {
+    try { overlay.remove(); } catch(_) {}
+  };
+  document.getElementById('deductionModalCloseBtn').onclick = closeOverlay;
+  document.getElementById('ded_cancel_modal').onclick = closeOverlay;
 
-  const form = document.getElementById('deductionForm');
-  document.getElementById('ded_reset').onclick = () => form.reset();
+  // Populate employee dropdown (uses the replacement function above)
+  await populateEmployeeDropdown('ded_employee_id_modal');
 
-  form.addEventListener('submit', async (e) => {
+  // Prefill month with current month
+  const monthInput = document.getElementById('ded_month_modal');
+  if (!monthInput.value) {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    monthInput.value = `${y}-${m}`;
+  }
+
+  // Reset behaviour
+  document.getElementById('ded_reset_modal').onclick = () => {
+    document.getElementById('deductionFormModal').reset();
+    // refresh employees dropdown (in case something changed)
+    populateEmployeeDropdown('ded_employee_id_modal');
+    // refill month
+    const now = new Date(); monthInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  };
+
+  // Submit handler
+  document.getElementById('deductionFormModal').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const submitBtn = document.getElementById('ded_submit');
+    const submitBtn = document.getElementById('ded_submit_modal');
     submitBtn.disabled = true;
 
-    const employee_id = parseInt(document.getElementById('ded_employee_id').value, 10);
-    const month = document.getElementById('ded_month').value;
-    const reason = document.getElementById('ded_reason').value;
-    const amount = Number(document.getElementById('ded_amount').value || 0);
-    const note = document.getElementById('ded_note').value.trim();
+    const employee_id = document.getElementById('ded_employee_id_modal').value;
+    const month = document.getElementById('ded_month_modal').value;
+    const reason = document.getElementById('ded_reason_modal').value;
+    const amount = Number(document.getElementById('ded_amount_modal').value || 0);
+    const note = document.getElementById('ded_note_modal').value.trim();
 
     if (!employee_id) { alert('Please select an employee'); submitBtn.disabled = false; return; }
     if (!month) { alert('Please select month'); submitBtn.disabled = false; return; }
-    if (!reason) { alert('Please select reason'); submitBtn.disabled = false; return; }
+    if (!reason) { alert('Please select a reason'); submitBtn.disabled = false; return; }
     if (!(amount > 0)) { alert('Amount must be greater than 0'); submitBtn.disabled = false; return; }
 
+    const payload = { employee_id: Number(employee_id), month, reason, amount, note };
+
     try {
-      const res = await fetch('/api/deductions', {
+      const res = await fetchAuth('/api/deductions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ employee_id, month, reason, amount, note })
+        body: JSON.stringify(payload)
       });
-      if (!res.ok) throw new Error(await res.text());
-      alert('Deduction saved');
-      form.reset();
+
+      if (!res.ok) {
+        const txt = await res.text().catch(()=>null);
+        throw new Error(txt || 'Server error ' + res.status);
+      }
+
+      alert('Deduction saved.');
+      closeOverlay();
+      // refresh UI if functions exist
+      if (typeof window.showTable === 'function') try { window.showTable('deductions'); } catch(e) {}
+      if (typeof window.loadDeductions === 'function') try { window.loadDeductions(); } catch(e) {}
     } catch (err) {
       console.error('Create deduction error:', err);
       alert('Failed to save: ' + (err.message || 'Unknown error'));
@@ -144,6 +213,7 @@ window.showDeductionForm = async () => {
     }
   });
 };
+
 
 // === EDIT DEDUCTION MODAL ===
 // Schema: id, employee_id, amount, reason, date, month

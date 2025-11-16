@@ -27,149 +27,233 @@ export const loadEmployees = async () => {
   }
 };
 
-/** Render Create Employee form (single visible form, with Client dropdown) */
+// ===== floating modal Create Employee form with Upload Photo =====
 async function showEmployeeForm() {
-  // Hide any open table containers so only one section remains visible
+  // Hide other page sections (same behavior as before)
   document.querySelectorAll('[id^="table-container-"]').forEach(div => (div.style.display = 'none'));
-
-  // Hide any other forms that follow the same naming pattern
   document.querySelectorAll('[id^="form-container-"]').forEach(div => (div.style.display = 'none'));
 
-  // Create or reuse our form container
-  const containerId = 'form-container-employee';
-  let container = document.getElementById(containerId);
-  if (!container) {
-    container = document.createElement('div');
-    container.id = containerId;
-    document.getElementById('content').appendChild(container);
-  }
-  container.style.display = 'block';
+  // Create overlay + modal
+  const overlay = document.createElement('div');
+  overlay.id = 'employeeModalOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;z-index:9999;';
 
-  // Build form UI (Client is dropdown now)
-  container.innerHTML = `
-    <h3>Create Employee</h3>
-    <form id="employeeForm" autocomplete="off">
-      <input type="text" placeholder="Name" id="name" required><br>
-      <input type="text" placeholder="Father's Name" id="father_name"><br>
-      <input type="text" placeholder="Local Address" id="local_address"><br>
-      <input type="text" placeholder="Permanent Address" id="permanent_address"><br>
-      <input type="text" placeholder="Telephone" id="telephone"><br>
-      <input type="email" placeholder="Email" id="email"><br>
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#fff;width:880px;max-width:98%;padding:18px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);max-height:92vh;overflow:auto;';
+  modal.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <h3 style="margin:0">Create Employee</h3>
+      <button id="empModalClose" style="font-size:24px;border:none;background:transparent;cursor:pointer">&times;</button>
+    </div>
 
-      <select id="marital_status">
-        <option value="married">married</option>
-        <option value="single">single</option>
-      </select><br>
+    <form id="employeeFormModal" autocomplete="off" style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;">
+      <label style="grid-column:1 / span 1">Name<br><input type="text" id="name" required style="width:100%;padding:8px"></label>
+      <label style="grid-column:2 / span 1">Father's Name<br><input type="text" id="father_name" style="width:100%;padding:8px"></label>
 
-      <input type="text" placeholder="Spouse Name" id="spouse_name"><br>
-      <input type="text" placeholder="Next of Kin Name" id="next_kin_name"><br>
-      <input type="text" placeholder="Next of Kin Telephone" id="next_kin_telephone"><br>
-      <input type="text" placeholder="Next of Kin Address" id="next_kin_address"><br>
-      <input type="text" placeholder="Identifier Name" id="identifier_name"><br>
-      <input type="text" placeholder="Identifier Address" id="identifier_address"><br>
-      <input type="text" placeholder="Identifier Telephone" id="identifier_telephone"><br>
-      <input type="text" placeholder="EPF Number" id="epf_number"><br>
-      <input type="text" placeholder="ESIC Number" id="esic_number"><br>
-      <input type="text" placeholder="Criminal Record (yes/no)" id="criminal_record"><br>
-      <input type="number" placeholder="Salary per Month" id="salary_per_month" min="0" step="1"><br>
+      <label style="grid-column:1 / span 2">Local Address<br><input type="text" id="local_address" style="width:100%;padding:8px"></label>
+      <label style="grid-column:1 / span 2">Permanent Address<br><input type="text" id="permanent_address" style="width:100%;padding:8px"></label>
 
-      <select id="category">
-        <option value="security guard">security guard</option>
-        <option value="lady searcher">lady searcher</option>
-        <option value="security supervisor">security supervisor</option>
-        <option value="assistant security officer">assistant security officer</option>
-        <option value="security officer">security officer</option>
-        <option value="unskilled workman">unskilled workman</option>
-        <option value="skilled workman">skilled workman</option>
-        <option value="work supervisor">work supervisor</option>
-      </select><br>
+      <label>Telephone<br><input type="text" id="telephone" style="width:100%;padding:8px"></label>
+      <label>Email<br><input type="email" id="email" style="width:100%;padding:8px"></label>
 
-      <!-- Client dropdown replaces plain number input -->
-      <select id="client_id" required>
-        <option value="">Loading clients...</option>
-      </select><br>
+      <label>Marital Status<br>
+        <select id="marital_status" style="width:100%;padding:8px;">
+          <option value="married">married</option>
+          <option value="single">single</option>
+        </select>
+      </label>
+      <label>Spouse Name<br><input type="text" id="spouse_name" style="width:100%;padding:8px"></label>
 
-      <div style="margin-top:8px;">
-        <button type="submit" id="employeeCreateBtn">Create</button>
-        <button type="button" id="employeeResetBtn">Reset</button>
+      <label>Next of Kin Name<br><input type="text" id="next_kin_name" style="width:100%;padding:8px"></label>
+      <label>Next of Kin Telephone<br><input type="text" id="next_kin_telephone" style="width:100%;padding:8px"></label>
+
+      <label style="grid-column:1 / span 2">Next of Kin Address<br><input type="text" id="next_kin_address" style="width:100%;padding:8px"></label>
+
+      <label>Identifier Name<br><input type="text" id="identifier_name" style="width:100%;padding:8px"></label>
+      <label>Identifier Address<br><input type="text" id="identifier_address" style="width:100%;padding:8px"></label>
+      <label>Identifier Telephone<br><input type="text" id="identifier_telephone" style="width:100%;padding:8px"></label>
+      <label>EPF Number<br><input type="text" id="epf_number" style="width:100%;padding:8px"></label>
+
+      <label>ESIC Number<br><input type="text" id="esic_number" style="width:100%;padding:8px"></label>
+      <label>Criminal Record (yes/no)<br><input type="text" id="criminal_record" style="width:100%;padding:8px"></label>
+
+      <label>Salary per Month<br><input type="number" id="salary_per_month" min="0" step="1" style="width:100%;padding:8px"></label>
+      <label>Category<br>
+        <select id="category" style="width:100%;padding:8px;">
+          <option value="security guard">security guard</option>
+          <option value="lady searcher">lady searcher</option>
+          <option value="security supervisor">security supervisor</option>
+          <option value="assistant security officer">assistant security officer</option>
+          <option value="security officer">security officer</option>
+          <option value="unskilled workman">unskilled workman</option>
+          <option value="skilled workman">skilled workman</option>
+          <option value="work supervisor">work supervisor</option>
+        </select>
+      </label>
+
+      <label>Client<br>
+        <select id="client_id_modal" required style="width:100%;padding:8px;">
+          <option>Loading clients...</option>
+        </select>
+      </label>
+
+      <!-- Photo area -->
+      <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start;padding:8px;border:1px dashed #ddd;border-radius:6px;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button type="button" id="uploadPhotoBtn" style="padding:8px 12px;">Upload Photo</button>
+          <button type="button" id="removePhotoBtn" style="padding:8px 12px;">Remove Photo</button>
+        </div>
+        <input type="file" id="employee_photo_input" accept="image/*" style="display:none;">
+        <div id="photoPreviewContainer" style="width:120px;height:120px;border:1px solid #eee;display:flex;align-items:center;justify-content:center;background:#fafafa;">
+          <span style="color:#888;">No photo</span>
+        </div>
+        <small style="color:#666">Upload a clear photo (jpg/png). File size recommended &lt; 2MB.</small>
+      </div>
+
+      <!-- Buttons -->
+      <div style="grid-column:1 / span 2;display:flex;justify-content:flex-end;gap:10px;margin-top:12px;">
+        <button type="button" id="employeeResetBtnModal" style="padding:8px 12px;">Reset</button>
+        <button type="button" id="employeeCancelBtnModal" style="padding:8px 12px;">Cancel</button>
+        <button type="submit" id="employeeCreateBtnModal" style="background:#007bff;color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer">Create</button>
       </div>
     </form>
   `;
 
-  // Populate Client dropdown
-  await populateClientDropdown('client_id');
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
 
-  // Wire Reset button
-  const formEl = document.getElementById('employeeForm');
-  document.getElementById('employeeResetBtn').addEventListener('click', () => {
+  // Close / Cancel handlers
+  document.getElementById('empModalClose').onclick = () => overlay.remove();
+  document.getElementById('employeeCancelBtnModal').onclick = () => overlay.remove();
+
+  // Wire Reset
+  const formEl = document.getElementById('employeeFormModal');
+  document.getElementById('employeeResetBtnModal').addEventListener('click', () => {
     formEl.reset();
-    const clientSel = document.getElementById('client_id');
+    clearPhotoPreview();
+    // reset client dropdown to first option if populated
+    const clientSel = document.getElementById('client_id_modal');
     if (clientSel && clientSel.options.length) clientSel.selectedIndex = 0;
   });
 
-  // Submit handler: POST to /api/employees and clear on success
-  formEl.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const submitBtn = document.getElementById('employeeCreateBtn');
-    submitBtn.disabled = true;
+  // Photo upload wiring
+  const fileInput = document.getElementById('employee_photo_input');
+  const uploadBtn = document.getElementById('uploadPhotoBtn');
+  const removeBtn = document.getElementById('removePhotoBtn');
+  const photoPreviewContainer = document.getElementById('photoPreviewContainer');
+  let selectedPhotoFile = null;
 
-    const data = {
-      name: document.getElementById('name').value.trim(),
-      father_name: document.getElementById('father_name').value.trim(),
-      local_address: document.getElementById('local_address').value.trim(),
-      permanent_address: document.getElementById('permanent_address').value.trim(),
-      telephone: document.getElementById('telephone').value.trim(),
-      email: document.getElementById('email').value.trim(),
-      marital_status: document.getElementById('marital_status').value,
-      spouse_name: document.getElementById('spouse_name').value.trim(),
-      next_kin_name: document.getElementById('next_kin_name').value.trim(),
-      next_kin_telephone: document.getElementById('next_kin_telephone').value.trim(),
-      next_kin_address: document.getElementById('next_kin_address').value.trim(),
-      identifier_name: document.getElementById('identifier_name').value.trim(),
-      identifier_address: document.getElementById('identifier_address').value.trim(),
-      identifier_telephone: document.getElementById('identifier_telephone').value.trim(),
-      epf_number: document.getElementById('epf_number').value.trim(),
-      esic_number: document.getElementById('esic_number').value.trim(),
-      criminal_record: document.getElementById('criminal_record').value.trim(),
-      salary_per_month: parseFloat(document.getElementById('salary_per_month').value || '0'),
-      category: document.getElementById('category').value,
-      client_id: parseInt(document.getElementById('client_id').value, 10)
-    };
+  function clearPhotoPreview() {
+    selectedPhotoFile = null;
+    photoPreviewContainer.innerHTML = '<span style="color:#888;">No photo</span>';
+    fileInput.value = '';
+  }
 
-    if (!data.client_id) {
-      alert('Please select a Client.');
-      submitBtn.disabled = false;
+  uploadBtn.onclick = () => fileInput.click();
+  removeBtn.onclick = clearPhotoPreview;
+
+  fileInput.addEventListener('change', (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    if (!f) return clearPhotoPreview();
+    // basic file size check (optional)
+    if (f.size > 5 * 1024 * 1024) { // 5MB safety limit
+      alert('File too large. Please choose an image under 5 MB.');
+      fileInput.value = '';
       return;
     }
+    // preview
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = document.createElement('img');
+      img.src = reader.result;
+      img.style.maxWidth = '100%';
+      img.style.maxHeight = '100%';
+      img.style.objectFit = 'cover';
+      photoPreviewContainer.innerHTML = '';
+      photoPreviewContainer.appendChild(img);
+    };
+    reader.readAsDataURL(f);
+    selectedPhotoFile = f;
+  });
+
+  // Populate client dropdown using your existing helper
+  await populateClientDropdown('client_id_modal');
+
+  // Submit handler: send multipart/form-data with photo (if selected)
+  formEl.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const submitBtn = document.getElementById('employeeCreateBtnModal');
+    submitBtn.disabled = true;
 
     try {
-      const response = await fetch('/api/employees', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      });
+      const data = {
+        name: document.getElementById('name').value.trim(),
+        father_name: document.getElementById('father_name').value.trim(),
+        local_address: document.getElementById('local_address').value.trim(),
+        permanent_address: document.getElementById('permanent_address').value.trim(),
+        telephone: document.getElementById('telephone').value.trim(),
+        email: document.getElementById('email').value.trim(),
+        marital_status: document.getElementById('marital_status').value,
+        spouse_name: document.getElementById('spouse_name').value.trim(),
+        next_kin_name: document.getElementById('next_kin_name').value.trim(),
+        next_kin_telephone: document.getElementById('next_kin_telephone').value.trim(),
+        next_kin_address: document.getElementById('next_kin_address').value.trim(),
+        identifier_name: document.getElementById('identifier_name').value.trim(),
+        identifier_address: document.getElementById('identifier_address').value.trim(),
+        identifier_telephone: document.getElementById('identifier_telephone').value.trim(),
+        epf_number: document.getElementById('epf_number').value.trim(),
+        esic_number: document.getElementById('esic_number').value.trim(),
+        criminal_record: document.getElementById('criminal_record').value.trim(),
+        salary_per_month: parseFloat(document.getElementById('salary_per_month').value || '0'),
+        category: document.getElementById('category').value,
+        client_id: parseInt(document.getElementById('client_id_modal').value, 10) || null
+      };
 
-      if (!response.ok) {
-        const err = await tryText(response);
-        throw new Error(err || 'Failed to create employee');
+      if (!data.name) {
+        alert('Please enter employee name.');
+        submitBtn.disabled = false;
+        return;
+      }
+      if (!data.client_id) {
+        alert('Please select a client.');
+        submitBtn.disabled = false;
+        return;
       }
 
-      alert('Employee created');
-      // ✅ Clear the form after success
-      formEl.reset();
-      const clientSel = document.getElementById('client_id');
-      if (clientSel && clientSel.options.length) clientSel.selectedIndex = 0;
+      // Build FormData
+      const formData = new FormData();
+      Object.keys(data).forEach(k => {
+        if (data[k] !== null && data[k] !== undefined) formData.append(k, String(data[k]));
+      });
+      if (selectedPhotoFile) formData.append('photo', selectedPhotoFile, selectedPhotoFile.name);
 
-      // (Optional) Immediately show Employees table:
-      // if (typeof window.showTable === 'function') window.showTable('employees');
+      // Send to server (multipart/form-data)
+      const res = await fetch('/api/employees', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData
+      });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(()=>null);
+        throw new Error(txt || 'Server error ' + res.status);
+      }
+
+      alert('Employee created successfully.');
+      overlay.remove();
+
+      // refresh employees list / table if functions exist
+      if (typeof window.showTable === 'function') try { window.showTable('employees'); } catch(e){}
+      if (typeof window.loadEmployees === 'function') try { window.loadEmployees(); } catch(e){}
     } catch (err) {
-      console.error('Employee create error:', err);
+      console.error('Create employee failed:', err);
       alert('Failed to create employee: ' + (err.message || 'Unknown error'));
     } finally {
       submitBtn.disabled = false;
     }
   });
 }
+
 
 /** Populate client dropdown with id + name */
 async function populateClientDropdown(selectId) {

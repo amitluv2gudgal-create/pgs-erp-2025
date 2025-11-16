@@ -7,82 +7,127 @@ import { loadInvoices } from './invoices.js';
 import { loadSalaries } from './salaries.js';
 import { loadRequests } from './requests.js';
 
-// ✅ FIX: spread opts correctly + always include cookies
+// ---------- global fetch wrapper (force cookies by default) ----------
+(() => {
+  const origFetch = window.fetch.bind(window);
+  window.fetch = (input, init = {}) => {
+    const normalizedInit = Object.assign({}, init);
+    if (!normalizedInit.credentials) normalizedInit.credentials = 'include';
+    return origFetch(input, normalizedInit);
+  };
+  console.log('[CLIENT] global fetch wrapper enabled — credentials: include by default');
+})();
+
+// small helper wrapper that always includes credentials (explicit)
 const fetchAuth = (url, opts = {}) => fetch(url, { credentials: 'include', ...opts });
 
-let user; // Declare user globally
+// global user object (will hold the parsed user)
+let user = null;
 
+// ---------- ON LOAD: validate session and render dashboard ----------
 document.addEventListener('DOMContentLoaded', async () => {
-  const res = await fetch('/api/auth/current-user', { credentials: 'include' });
-  if (!res.ok) {
-    window.location.href = '/login.html';
-    return;
-  }
-  user = await res.json();
-  if (!user || typeof user.role === 'undefined') {
-    console.error('User data is invalid or missing role:', user);
-    window.location.href = '/login.html';
-    return;
-  }
-  const content = document.getElementById('content');
-  content.innerHTML = `<h2>Welcome, ${user.role}</h2>`;
+  try {
+    // fetch current user: the server returns { ok: true, user: { ... } }
+    const res = await fetchAuth('/api/auth/current-user', { method: 'GET' });
+    console.log('[CLIENT] /api/auth/current-user status:', res.status);
+    const body = await res.json().catch(() => null);
+    console.log('[CLIENT] /api/auth/current-user body:', body);
 
-  if (user.role !== 'security_supervisor') {
-    content.innerHTML += '<button onclick="showTable(\'clients\')">View Clients</button>';
-    content.innerHTML += '<button onclick="showTable(\'employees\')">View Employees</button>';
-    content.innerHTML += '<button onclick="showTable(\'attendances\')">View Attendances</button>';
-    content.innerHTML += '<button onclick="showTable(\'deductions\')">View Deductions</button>';
-    content.innerHTML += '<button onclick="showTable(\'invoices\')">View Invoices</button>';
-    content.innerHTML += '<button onclick="showTable(\'salaries\')">View Salaries</button>';
-    content.innerHTML += '<button onclick="showUnifiedSearch()">Search Profile</button>';
-  }
-  window.showUnifiedSearch = showUnifiedSearch;
-
-
-  if (user.role === 'accountant') {
-    content.innerHTML += '<h3>Accountant Actions</h3>';
-    content.innerHTML += '<button onclick="showForm(\'client\')">Create Client</button>';
-    content.innerHTML += '<button onclick="showForm(\'deduction\')">Create Deduction</button>';
-    content.innerHTML += '<button onclick="showForm(\'invoice\')">Generate Invoice</button>';
-    content.innerHTML += '<button onclick="showForm(\'salary\')">Generate Salary</button>';
-  } else if (user.role === 'hr') {
-    content.innerHTML += '<h3>HR Actions</h3>';
-    content.innerHTML += '<button onclick="showForm(\'employee\')">Create Employee</button>';
-    content.innerHTML += '<button onclick="showForm(\'attendance\')">Create Attendance</button>';
-  } else if (user.role === 'admin') {
-    content.innerHTML += '<h3>Admin Actions</h3>';
-    content.innerHTML += '<button onclick="showPendingRequests()">View Pending Requests</button>';
-    content.innerHTML += '<button onclick="showSupervisorForm()">Create Security Supervisor</button>';
-    content.innerHTML += '<button onclick="showTable(\'security_supervisors\')">View Security Supervisors</button>';
-    const adminSection = document.getElementById('adminSection');
-    if (adminSection) adminSection.style.display = 'block';
-  } else if (user.role === 'security_supervisor') {
-    content.innerHTML += '<button onclick="showAttendanceFormForSupervisor()">Submit Attendance</button>';
-  }
-
-  if (['admin', 'accountant', 'hr'].includes(user.role)) {
-    content.innerHTML += '<button onclick="showChangePassword()">Change Password</button>';
-  }
-
-  if (user.role === 'admin') {
-    if (!document.getElementById('btnAdminResetAny')) {
-      const btn = document.createElement('button');
-      btn.id = 'btnAdminResetAny';
-      btn.textContent = 'Reset Any Password (Admin)';
-      btn.onclick = showAdminResetAnyPassword;
-      content.appendChild(btn);
+    if (!res.ok || !body || !body.ok) {
+      // not authenticated — go to login
+      console.warn('[CLIENT] not authenticated, redirecting to login');
+      window.location.href = '/login.html';
+      return;
     }
-  }
 
-  document.getElementById('logoutBtn').addEventListener('click', async () => {
-    try {
-      await fetch('/api/auth/logout', { credentials: 'include' });
-    } catch (err) {
-      console.error('Logout error:', err);
+    // set global user to the nested user object
+    user = body.user;
+    if (!user || typeof user.role === 'undefined') {
+      console.error('[CLIENT] current-user response missing user.role, redirecting to login', user);
+      window.location.href = '/login.html';
+      return;
     }
+
+    // render welcome & role buttons
+    const content = document.getElementById('content');
+    if (!content) {
+      console.error('[CLIENT] #content element missing in DOM');
+      return;
+    }
+    content.innerHTML = `<h2>Welcome, ${escapeHtml(user.username || user.role)}</h2>`;
+
+    // role-based UI
+    if (user.role !== 'security_supervisor') {
+      content.innerHTML += '<button onclick="showTable(\'clients\')">View Clients</button>';
+      content.innerHTML += '<button onclick="showTable(\'employees\')">View Employees</button>';
+      content.innerHTML += '<button onclick="showTable(\'attendances\')">View Attendances</button>';
+      content.innerHTML += '<button onclick="showTable(\'deductions\')">View Deductions</button>';
+      content.innerHTML += '<button onclick="showTable(\'invoices\')">View Invoices</button>';
+      content.innerHTML += '<button onclick="showTable(\'salaries\')">View Salaries</button>';
+      content.innerHTML += '<button onclick="showUnifiedSearch()">Search Profile</button>';
+    }
+    window.showUnifiedSearch = showUnifiedSearch;
+
+    if (user.role === 'accountant') {
+      content.innerHTML += '<h3>Accountant Actions</h3>';
+      content.innerHTML += '<button onclick="showForm(\'client\')">Create Client</button>';
+      content.innerHTML += '<button onclick="showForm(\'deduction\')">Create Deduction</button>';
+      content.innerHTML += '<button onclick="showForm(\'invoice\')">Generate Invoice</button>';
+      content.innerHTML += '<button onclick="showForm(\'salary\')">Generate Salary</button>';
+    } else if (user.role === 'hr') {
+      content.innerHTML += '<h3>HR Actions</h3>';
+      content.innerHTML += '<button onclick="showForm(\'employee\')">Create Employee</button>';
+      content.innerHTML += '<button onclick="showForm(\'attendance\')">Create Attendance</button>';
+    } else if (user.role === 'admin') {
+      content.innerHTML += '<h3>Admin Actions</h3>';
+      content.innerHTML += '<button onclick="showPendingRequests()">View Pending Requests</button>';
+      content.innerHTML += '<button onclick="showSupervisorForm()">Create Security Supervisor</button>';
+      content.innerHTML += '<button onclick="showTable(\'security_supervisors\')">View Security Supervisors</button>';
+      const adminSection = document.getElementById('adminSection');
+      if (adminSection) adminSection.style.display = 'block';
+    } else if (user.role === 'security_supervisor') {
+      content.innerHTML += '<button onclick="showAttendanceFormForSupervisor()">Submit Attendance</button>';
+    }
+
+    if (['admin', 'accountant', 'hr'].includes(user.role)) {
+      content.innerHTML += '<button onclick="showChangePassword()">Change Password</button>';
+    }
+
+    // ensure admin reset button added once
+    if (user.role === 'admin') {
+      if (!document.getElementById('btnAdminResetAny')) {
+        const btn = document.createElement('button');
+        btn.id = 'btnAdminResetAny';
+        btn.textContent = 'Reset Any Password (Admin)';
+        btn.onclick = showAdminResetAnyPassword;
+        content.appendChild(btn);
+      }
+    }
+
+    // attach logout handler (ensure button exists)
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', async () => {
+        try {
+          await fetchAuth('/api/auth/logout', { method: 'GET' });
+        } catch (err) {
+          console.error('Logout error:', err);
+        }
+        window.location.href = '/login.html';
+      });
+    } else {
+      console.warn('[CLIENT] logoutBtn not found in DOM');
+    }
+
+  } catch (err) {
+    console.error('[CLIENT] init error:', err);
+    // fallback to login
     window.location.href = '/login.html';
-  });
+  }
 });
+
+// Expose user so other modules / inline handlers can use it
+window.user = user;
 
 window.showForm = (type) => {
   if (type === 'client') window.showClientForm && window.showClientForm();
@@ -185,9 +230,27 @@ window.showSupervisorForm = async () => {
       alert('Please select a client');
       return;
     }
+
     const response = await fetch('/api/security-supervisors/create', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, username, password, client_id, site_name })
-    });
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ name, username, password, client_id, site_name })
+  });
+
+  async function safeGet(url) {
+  try {
+    const r = await fetch(url, { credentials: 'include' });
+    if (!r.ok) throw new Error(await r.text());
+    return await r.json();
+  } catch (e) {
+    console.error('GET failed:', url, e);
+    return [];
+  }
+}
+    // const response = await fetch('/api/security-supervisors/create', {
+    //   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, username, password, client_id, site_name })
+    // });
     if (response.ok) {
       const data = await response.json();
       alert(`Supervisor created successfully with ID: ${data.id}`);
@@ -371,17 +434,25 @@ window.renderTable = (containerId, table, data, searchTerm) => {
       }
 
       html += `<tr${matchStyle}>`;
-      Object.values(row).forEach(val => {
-        const displayVal = (typeof val === 'object' && val !== null) ? JSON.stringify(val) : (val ?? '');
-        let cellStyle = '';
-        if (searchTerm) {
-          const exactMode = window[`exact_${table}`] || false;
-          const valStr = displayVal.toString().toLowerCase();
-          const cellMatches = exactMode ? (valStr === searchTerm) : valStr.includes(searchTerm);
-          if (cellMatches) cellStyle = ' style="background-color: lightyellow; font-weight: bold;"';
-        }
-        html += `<td${cellStyle}>${displayVal}</td>`;
-      });
+      
+      Object.keys(row).forEach(key => {
+  let val = row[key];
+
+  // If column is 'photo', show image preview instead of text
+  if (key === 'photo' && val) {
+    html += `
+      <td>
+        <img src="/${val}" 
+             style="width:50px;height:50px;border-radius:6px;object-fit:cover;cursor:pointer;"
+             onclick="window.open('/${val}','_blank')" />
+      </td>`;
+  } else {
+    const displayVal = (typeof val === 'object' && val !== null)
+      ? JSON.stringify(val)
+      : (val ?? '');
+    html += `<td>${displayVal}</td>`;
+  }
+});
 
       // Actions cell
       if (table === 'attendances' && user?.role === 'hr') {

@@ -16,38 +16,216 @@ export const loadSalaries = async () => {
   return await res.json();
 };
 
-window.showSalaryForm = () => {
-  const content = document.getElementById('content');
-  content.innerHTML += `
-    <h3>Generate Salary</h3>
-    <form id="salaryForm">
-      <input type="number" placeholder="Employee ID" id="employee_id" required><br>
-      <input type="month" id="month" value="2025-09" required><br>
-      <button type="submit">Generate</button>
+// Replace existing window.showSalaryForm with this implementation
+// Self-contained: includes escapeHtml helper and robust employee loading.
+
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+window.showSalaryForm = async () => {
+  // helper to fetch employees (attempt several fallbacks)
+  const getEmployees = async () => {
+    // 1) try existing helper fetchEmployeesList()
+    try {
+      if (typeof fetchEmployeesList === 'function') {
+        const list = await fetchEmployeesList();
+        if (Array.isArray(list) && list.length) return list;
+      }
+    } catch (e) {
+      console.warn('fetchEmployeesList helper failed:', e);
+    }
+
+    // 2) try direct fetch to /api/employees with cookies
+    try {
+      const resp = await fetch('/api/employees', { credentials: 'include' });
+      if (resp.ok) {
+        const list = await resp.json();
+        if (Array.isArray(list)) return list;
+      } else {
+        console.warn('/api/employees returned', resp.status);
+      }
+    } catch (e) {
+      console.warn('Direct fetch /api/employees failed:', e);
+    }
+
+    // 3) try loadEmployees() fallback
+    try {
+      if (typeof loadEmployees === 'function') {
+        const list = await loadEmployees();
+        if (Array.isArray(list)) return list;
+      }
+    } catch (e) {
+      console.warn('loadEmployees fallback failed:', e);
+    }
+
+    return [];
+  };
+
+  // create overlay + modal
+  const overlay = document.createElement('div');
+  overlay.id = 'salaryModalOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;z-index:9999;';
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#fff;width:520px;max-width:96%;padding:18px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);max-height:90vh;overflow:auto;';
+  modal.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <h3 style="margin:0">Generate Salary</h3>
+      <button id="salaryModalClose" style="font-size:22px;border:none;background:transparent;cursor:pointer">&times;</button>
+    </div>
+
+    <form id="salaryModalForm" style="display:grid;grid-template-columns:1fr;gap:10px;">
+      <label>Employee (required):<br>
+        <select id="salary_employee_select" required style="width:100%;padding:8px;">
+          <option>Loading employees...</option>
+        </select>
+      </label>
+
+      <label>Month (YYYY-MM, required):<br>
+        <input type="month" id="salary_month" required style="width:100%;padding:8px;">
+      </label>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px;">
+        <button type="button" id="salary_reset_btn" style="padding:8px 12px;">Reset</button>
+        <button type="button" id="salary_cancel_btn" style="padding:8px 12px;">Cancel</button>
+        <button type="submit" id="salary_generate_btn" style="background:#007bff;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer">Generate</button>
+      </div>
     </form>
   `;
-  document.getElementById('salaryForm').addEventListener('submit', async (e) => {
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  // handlers
+  document.getElementById('salaryModalClose').onclick = () => overlay.remove();
+  document.getElementById('salary_cancel_btn').onclick = () => overlay.remove();
+
+  const empSelect = document.getElementById('salary_employee_select');
+  const monthInput = document.getElementById('salary_month');
+  const resetBtn = document.getElementById('salary_reset_btn');
+  const submitBtn = document.getElementById('salary_generate_btn');
+
+  // prefill month with current month if empty
+  if (!monthInput.value) {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    monthInput.value = `${y}-${m}`;
+  }
+
+  // populate employees
+  empSelect.disabled = true;
+  empSelect.innerHTML = '<option>Loading employees...</option>';
+  try {
+    const emps = await getEmployees();
+
+    if (!Array.isArray(emps) || emps.length === 0) {
+      empSelect.innerHTML = '<option value="">No employees available</option>';
+      empSelect.disabled = true;
+    } else {
+      empSelect.disabled = false;
+      const options = ['<option value="">-- Select Employee --</option>'];
+      for (const e of emps) {
+        const id = e.id ?? e.employee_id ?? e.employeeId ?? '';
+        const name = e.name ?? e.full_name ?? e.employee_name ?? (`ID ${id}`);
+        const extra = e.designation ? ` - ${e.designation}` : (e.site_name ? ` - ${e.site_name}` : '');
+        options.push(`<option value="${escapeHtml(id)}">${escapeHtml(name + extra)} (ID: ${escapeHtml(id)})</option>`);
+      }
+      empSelect.innerHTML = options.join('');
+    }
+  } catch (err) {
+    console.error('populate employees failed:', err);
+    empSelect.innerHTML = '<option value="">Failed to load employees</option>';
+    empSelect.disabled = true;
+  }
+
+  // Reset behavior
+  resetBtn.onclick = () => {
+    try {
+      document.getElementById('salaryModalForm').reset();
+      const now = new Date();
+      monthInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      // repopulate employees
+      (async () => {
+        empSelect.disabled = true;
+        empSelect.innerHTML = '<option>Loading employees...</option>';
+        const emps = await getEmployees();
+        if (!Array.isArray(emps) || emps.length === 0) {
+          empSelect.innerHTML = '<option value="">No employees available</option>';
+          empSelect.disabled = true;
+        } else {
+          empSelect.disabled = false;
+          const opts = ['<option value="">-- Select Employee --</option>'];
+          for (const e of emps) {
+            const id = e.id ?? e.employee_id ?? e.employeeId ?? '';
+            const name = e.name ?? e.full_name ?? e.employee_name ?? (`ID ${id}`);
+            const extra = e.designation ? ` - ${e.designation}` : (e.site_name ? ` - ${e.site_name}` : '');
+            opts.push(`<option value="${escapeHtml(id)}">${escapeHtml(name + extra)} (ID: ${escapeHtml(id)})</option>`);
+          }
+          empSelect.innerHTML = opts.join('');
+        }
+      })();
+    } catch (e) {
+      console.warn('Reset failed', e);
+    }
+  };
+
+  // submit/generate
+  document.getElementById('salaryModalForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const employee_id = document.getElementById('employee_id').value;
-    const month = document.getElementById('month').value || '2025-09';
-    if (!employee_id) {
-      alert('Please enter a valid Employee ID');
+    submitBtn.disabled = true;
+
+    const employeeId = empSelect.value;
+    const month = monthInput.value;
+
+    if (!employeeId) {
+      alert('Please select an employee.');
+      submitBtn.disabled = false;
       return;
     }
-    const res = await fetch(`/api/salaries/generate/${employee_id}/${month}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    if (res.ok) {
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
+    if (!month) {
+      alert('Please select month.');
+      submitBtn.disabled = false;
+      return;
+    }
+
+    try {
+      const url = `/api/salaries/generate/${encodeURIComponent(employeeId)}/${encodeURIComponent(month)}`;
+      const resp = await fetch(url, { method: 'POST', credentials: 'include' });
+
+      if (!resp.ok) {
+        let msg = 'Failed to generate salary';
+        try { const body = await resp.json(); msg = body.error || JSON.stringify(body); } catch(_) { msg = await resp.text().catch(()=>msg); }
+        throw new Error(msg);
+      }
+
+      // Expect a PDF blob to download
+      const blob = await resp.blob();
+      const filename = `salary_${employeeId}_${month}.pdf`;
+      const blobUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = `salary.pdf`;
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
       a.click();
-    } else {
-      const error = await res.json();
-      alert(`Error generating salary: ${error.error || 'Unknown error'}`);
+      a.remove();
+      window.URL.revokeObjectURL(blobUrl);
+
+      overlay.remove();
+      if (typeof window.showTable === 'function') try { window.showTable('salaries'); } catch(_) {}
+      if (typeof window.loadSalaries === 'function') try { window.loadSalaries(); } catch(_) {}
+    } catch (err) {
+      console.error('Generate salary error:', err);
+      alert('Error: ' + (err.message || 'Unknown error'));
+    } finally {
+      submitBtn.disabled = false;
     }
   });
 };
