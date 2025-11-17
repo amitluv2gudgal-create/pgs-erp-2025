@@ -241,6 +241,9 @@ wireStateDistrict(stateSelect, districtSelect);
         <option value="team leader housekeeping">Team Leader Housekeeping</option>
         <option value="workman unskilled">Workman Unskilled</option>
         <option value="workman skilled">Workman Skilled</option>
+        <option value="cctv operator">CCTV Operator</option>
+        <option value="steward">Steward</option>
+        <option value="office boy">Office Boy</option>
       </select>
       <input type="number" step="0.01" id="monthly_rate_${idx}" placeholder="Monthly Rate" style="padding:6px;width:160px;">
       <button type="button" class="removeCatBtn" style="padding:6px;">Remove</button>

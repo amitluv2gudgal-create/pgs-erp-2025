@@ -80,14 +80,19 @@ async function showEmployeeForm() {
       <label>Salary per Month<br><input type="number" id="salary_per_month" min="0" step="1" style="width:100%;padding:8px"></label>
       <label>Category<br>
         <select id="category" style="width:100%;padding:8px;">
-          <option value="security guard">security guard</option>
-          <option value="lady searcher">lady searcher</option>
-          <option value="security supervisor">security supervisor</option>
-          <option value="assistant security officer">assistant security officer</option>
-          <option value="security officer">security officer</option>
-          <option value="unskilled workman">unskilled workman</option>
-          <option value="skilled workman">skilled workman</option>
-          <option value="work supervisor">work supervisor</option>
+        <option value="security guard">security guard</option>
+        <option value="lady sercher">lady sercher</option>
+        <option value="security supervisor">security supervisor</option>
+        <option value="assistant security officer">assistant security officer</option>
+        <option value="security officer">security officer</option>
+        <option value="housekeeper">housekeeper</option>
+        <option value="housekeeping supervisor">housekeeping supervisor</option>
+        <option value="team leader housekeeping">team leader housekeeping</option>
+        <option value="workman unskilled">workman unskilled</option>
+        <option value="workman skilled">workman skilled</option>
+        <option value="cctv operator">cctv operator</option>
+        <option value="steward">steward</option>
+        <option value="office boy">office boy</option>
         </select>
       </label>
 
