@@ -327,3 +327,52 @@ window.openEditSalary = async (id) => {
     alert('Failed to open editor: ' + (e.message || 'Unknown'));
   }
 };
+
+// Open salary slip PDF in a new tab (preview)
+async function openSalaryPdf(salaryId) {
+  try {
+    const resp = await fetch(`/api/salaries/${salaryId}/pdf`, { method: 'GET' });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      alert('Failed to load PDF: ' + resp.status + ' ' + txt);
+      return;
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60 * 1000);
+  } catch (err) {
+    console.error('openSalaryPdf err', err);
+    alert('Network/Server error: ' + String(err));
+  }
+}
+window.openSalaryPdf = openSalaryPdf;
+
+// Download salary slip PDF (force download)
+async function downloadSalaryPdf(salaryId) {
+  try {
+    const resp = await fetch(`/api/salaries/${salaryId}/download`, { method: 'GET' });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      alert('Failed to download PDF: ' + resp.status + ' ' + txt);
+      return;
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `SalarySlip_${salaryId}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60 * 1000);
+  } catch (err) {
+    console.error('downloadSalaryPdf err', err);
+    alert('Network/Server error: ' + String(err));
+  }
+}
+window.downloadSalaryPdf = downloadSalaryPdf;
+
+// Example usage: create buttons in your salary list rendering:
+// <button onclick="openSalaryPdf(<?=$salary.id?>)">Open PDF</button>
+// <button onclick="downloadSalaryPdf(<?=$salary.id?>)">Download PDF</button>

@@ -187,6 +187,13 @@ async function showEmployeeForm() {
   // Submit handler: send multipart/form-data with photo (if selected)
   formEl.addEventListener('submit', async (e) => {
     e.preventDefault();
+
+    // Replace create employee action to open modal
+document.getElementById('btnCreateEmployee').addEventListener('click', () => {
+  window.openCreateEmployeeModal();
+});
+
+
     const submitBtn = document.getElementById('employeeCreateBtnModal');
     submitBtn.disabled = true;
 
@@ -419,3 +426,146 @@ window.openEditEmployee = async (id) => {
     alert('Failed to open editor: ' + (e.message || 'Unknown'));
   }
 };
+
+// public/js/employees.js
+document.addEventListener('DOMContentLoaded', function () {
+  window.openCreateEmployeeModal = function () {
+    const modal = document.getElementById('modal');
+    modal.innerHTML = `
+      <div class="modal-content">
+        <h3>Create Employee</h3>
+        <form id="employeeCreateForm" enctype="multipart/form-data">
+          <div class="grid">
+            <label>Name<br><input name="name" id="name" required></label>
+            <label>Father's Name<br><input name="father_name" id="father_name"></label>
+            <label>Local Address<br><textarea name="local_address" id="local_address"></textarea></label>
+            <label>Permanent Address<br><textarea name="permanent_address" id="permanent_address"></textarea></label>
+            <label>Telephone<br><input name="telephone" id="telephone"></label>
+            <label>Email<br><input name="email" id="email" type="email"></label>
+            <label>Marital Status<br>
+              <select name="marital_status" id="marital_status">
+                <option value="">--select--</option>
+                <option value="single">single</option>
+                <option value="married">married</option>
+              </select>
+            </label>
+            <label>Spouse Name<br><input name="spouse_name" id="spouse_name"></label>
+
+            <label>Gender<br>
+              <select id="gender" name="gender">
+                <option value="">--select--</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+
+            <label>Salary per Month (legacy)<br><input type="number" step="0.01" id="salary_per_month" name="salary_per_month"></label>
+
+            <fieldset style="grid-column:1 / span 2;border:1px dashed #ddd;padding:12px;border-radius:6px;">
+              <legend>Salary components (optional)</legend>
+              <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
+                <label>Basic Rate<br><input type="number" step="0.01" id="basic_rate" name="basic_rate"></label>
+                <label>Special Allowance (DA)<br><input type="number" step="0.01" id="special_allowance" name="special_allowance"></label>
+                <label>HRA<br><input type="number" step="0.01" id="hra" name="hra"></label>
+                <label>CA<br><input type="number" step="0.01" id="ca" name="ca"></label>
+                <label>WA<br><input type="number" step="0.01" id="wa" name="wa"></label>
+                <label>Educ. Allowance<br><input type="number" step="0.01" id="educational_allowance" name="educational_allowance"></label>
+                <label>Add 4 Hours<br><input type="number" step="0.01" id="add_4_hours" name="add_4_hours"></label>
+                <label>Weekly off (₹)<br><input type="number" step="0.01" id="weekly_off_amount" name="weekly_off_amount"></label>
+                <label>Manual Total (optional)<br><input type="number" step="0.01" id="salary_total_manual" name="salary_total_manual"></label>
+              </div>
+
+              <div style="margin-top:8px;">
+                <label><input type="checkbox" id="epf_on_basic" name="epf_on_basic"> EPF Deduction on Basic</label><br>
+                <label><input type="checkbox" id="epf_on_basic_plus_da" name="epf_on_basic_plus_da"> EPF Deduction on Basic + DA</label>
+                <small style="color:#666">ESIC will be applied on the Total (gross) automatically.</small>
+              </div>
+            </fieldset>
+
+            <label>Client<br>
+              <select id="client_id" name="client_id">
+                <option value="">--select client--</option>
+              </select>
+            </label>
+
+            <label>Upload Photo<br><input type="file" id="photo" name="photo" accept="image/*"></label>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" id="createCancel">Cancel</button>
+            <button type="submit" id="createSave">Create</button>
+          </div>
+        </form>
+      </div>
+    `;
+
+    fetch('/api/clients').then(r => r.json()).then(j => {
+      if (j && j.clients) {
+        const sel = document.getElementById('client_id');
+        j.clients.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.id;
+          opt.textContent = c.name;
+          sel.appendChild(opt);
+        });
+      }
+    }).catch(()=>{});
+
+    document.getElementById('createCancel').addEventListener('click', ()=> {
+      modal.innerHTML = '';
+    });
+
+    const form = document.getElementById('employeeCreateForm');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData();
+
+      const keys = [
+        'name','father_name','local_address','permanent_address','telephone','email','marital_status','spouse_name',
+        'next_kin_name','next_kin_telephone','next_kin_address','identifier_name','identifier_address','identifier_telephone',
+        'epf_number','esic_number','criminal_record','salary_per_month','category','client_id','gender'
+      ];
+
+      for (const k of keys) {
+        const el = document.getElementById(k);
+        if (el && el.value !== '') fd.append(k, el.value);
+      }
+
+      const comps = [
+        'basic_rate','special_allowance','hra','ca','wa','educational_allowance','add_4_hours','weekly_off_amount','salary_total_manual'
+      ];
+      comps.forEach(c => {
+        const el = document.getElementById(c);
+        if (el && el.value !== '') fd.append(c, el.value);
+      });
+
+      fd.append('epf_on_basic', document.getElementById('epf_on_basic').checked ? '1' : '0');
+      fd.append('epf_on_basic_plus_da', document.getElementById('epf_on_basic_plus_da').checked ? '1' : '0');
+
+      const photoEl = document.getElementById('photo');
+      if (photoEl && photoEl.files && photoEl.files[0]) fd.append('photo', photoEl.files[0]);
+
+      try {
+        const res = await fetch('/api/employees', {
+          method: 'POST',
+          body: fd
+        });
+        const j = await res.json();
+        if (j && j.success) {
+          alert('Employee created');
+          modal.innerHTML = '';
+          if (window.reloadEmployees) window.reloadEmployees();
+        } else {
+          alert('Error creating employee: ' + (j.error || 'unknown'));
+        }
+      } catch (err) {
+        alert('Network error: ' + String(err));
+      }
+    });
+  };
+
+  window.openEditEmployeeModal = function (employee) {
+    console.log('openEditEmployeeModal called — implement modal rendering to prefill fields and PUT to /api/employees/:id');
+  };
+});

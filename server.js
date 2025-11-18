@@ -153,11 +153,8 @@ async function bootstrap() {
   }
 });
 
-  app.listen(PORT, () => {
-    console.log('Server running on port', PORT, 'NODE_ENV=' + (NODE_ENV || 'development'));
-  });
+  app.listen(PORT, '0.0.0.0', () => console.log('listening on', PORT));
 }
-
 bootstrap().catch((err) => {
   console.error('Fatal startup error:', err);
   process.exit(1);
